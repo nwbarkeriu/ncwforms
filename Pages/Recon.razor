@@ -1,0 +1,1006 @@
+@page "/recon"
+@using JobCompareApp.Models
+@using JobCompareApp.Services
+@inject IJSRuntime JS
+
+<h3>Reconciliation Audit Dashboard</h3>
+
+<div class="row mb-3">
+    <div class="col-md-4">
+        <label>QuickBooks File:</label>
+        <InputFile OnChange="HandleQBFile" class="form-control" />
+    </div>
+    <div class="col-md-4">
+        <label>Avionte File:</label>
+        <InputFile OnChange="HandleAvionteFile" class="form-control" />
+    </div>
+    <div class="col-md-4">
+        <label>Deposit Detail File (Optional):</label>
+        <InputFile OnChange="HandleDepositFile" class="form-control" />
+    </div>
+</div>
+
+<div class="row mb-3">
+    <div class="col-md-12">
+        <button class="btn btn-primary" @onclick="ProcessRecon" disabled="@(!CanProcessRecon)">
+            🔄 Process Reconciliation
+        </button>
+        <button class="btn btn-secondary ms-2" @onclick="ClearData">
+            🗑️ Clear All Data
+        </button>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(StatusMessage))
+{
+    <div class="alert @GetAlertClass() mt-3">@StatusMessage</div>
+}
+
+@if (ReconResults != null)
+{
+    <!-- Summary Dashboard -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5>📊 Summary Dashboard</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="text-center">
+                                <h4 class="text-primary">@QBEntries.Count</h4>
+                                <small>QB Records</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-center">
+                                <h4 class="text-success">@AvionteEntries.Count</h4>
+                                <small>Avionte Records</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-center">
+                                <h4 class="text-info">@ReconResults.ClientSummaries.Count</h4>
+                                <small>Clients</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-center">
+                                <h4 class="text-warning">@ReconResults.Variances.Count</h4>
+                                <small>Variances</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <ul class="nav nav-tabs" id="reconTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link @(ActiveTab == "summary" ? "active" : "")" @onclick="@(() => SetActiveTab("summary"))" type="button">
+                Client Summary
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link @(ActiveTab == "variances" ? "active" : "")" @onclick="@(() => SetActiveTab("variances"))" type="button">
+                Variances
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link @(ActiveTab == "pivots" ? "active" : "")" @onclick="@(() => SetActiveTab("pivots"))" type="button">
+                Pivot Tables
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link @(ActiveTab == "deposits" ? "active" : "")" @onclick="@(() => SetActiveTab("deposits"))" type="button">
+                Payment Methods
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content mt-3">
+        <!-- Client Summary Tab -->
+        @if (ActiveTab == "summary")
+        {
+            <div class="card">
+                <div class="card-header">
+                    <h5>📋 Client Summary with VLOOKUP Results</h5>
+                    <small class="text-muted">Click column headers to sort • Type in filter boxes to search</small>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th style="cursor: pointer;" @onclick="() => SortSummary(nameof(ClientSummary.ClientName))">
+                                        QB Client Name
+                                        @if (SummarySortColumn == nameof(ClientSummary.ClientName))
+                                        {
+                                            <i class="fas fa-sort-@(SummarySortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th style="cursor: pointer;" @onclick="() => SortSummary(nameof(ClientSummary.QBBalance))">
+                                        QB Balance
+                                        @if (SummarySortColumn == nameof(ClientSummary.QBBalance))
+                                        {
+                                            <i class="fas fa-sort-@(SummarySortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th style="cursor: pointer;" @onclick="() => SortSummary(nameof(ClientSummary.AviClientName))">
+                                        Avionte Client Name
+                                        @if (SummarySortColumn == nameof(ClientSummary.AviClientName))
+                                        {
+                                            <i class="fas fa-sort-@(SummarySortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th style="cursor: pointer;" @onclick="() => SortSummary(nameof(ClientSummary.AviBalance))">
+                                        Avionte Balance
+                                        @if (SummarySortColumn == nameof(ClientSummary.AviBalance))
+                                        {
+                                            <i class="fas fa-sort-@(SummarySortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th style="cursor: pointer;" @onclick="() => SortSummary(nameof(ClientSummary.Variance))">
+                                        Variance
+                                        @if (SummarySortColumn == nameof(ClientSummary.Variance))
+                                        {
+                                            <i class="fas fa-sort-@(SummarySortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th style="cursor: pointer;" @onclick="() => SortSummary(nameof(ClientSummary.PaymentType))">
+                                        Pymt type
+                                        @if (SummarySortColumn == nameof(ClientSummary.PaymentType))
+                                        {
+                                            <i class="fas fa-sort-@(SummarySortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th style="cursor: pointer;" @onclick="() => SortSummary(nameof(ClientSummary.Team))">
+                                        Team
+                                        @if (SummarySortColumn == nameof(ClientSummary.Team))
+                                        {
+                                            <i class="fas fa-sort-@(SummarySortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th style="cursor: pointer;" @onclick="() => SortSummary(nameof(ClientSummary.PRRep))">
+                                        PR Rep
+                                        @if (SummarySortColumn == nameof(ClientSummary.PRRep))
+                                        {
+                                            <i class="fas fa-sort-@(SummarySortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th style="cursor: pointer;" @onclick="() => SortSummary(nameof(ClientSummary.SendType))">
+                                        Send Type
+                                        @if (SummarySortColumn == nameof(ClientSummary.SendType))
+                                        {
+                                            <i class="fas fa-sort-@(SummarySortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th style="cursor: pointer;" @onclick="() => SortSummary(nameof(ClientSummary.AccountType))">
+                                        Account Type
+                                        @if (SummarySortColumn == nameof(ClientSummary.AccountType))
+                                        {
+                                            <i class="fas fa-sort-@(SummarySortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th>Billing Notes (USER INPUT MEMO FIELD)</th>
+                                    <th>Notes</th>
+                                    <th style="cursor: pointer;" @onclick="() => SortSummary(nameof(ClientSummary.Status))">
+                                        Status
+                                        @if (SummarySortColumn == nameof(ClientSummary.Status))
+                                        {
+                                            <i class="fas fa-sort-@(SummarySortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                </tr>
+                                <!-- Filter Row -->
+                                <tr class="bg-light">
+                                    <th><input type="text" class="form-control form-control-sm" placeholder="Filter QB..." @bind="SummaryFilters.ClientName" @oninput="FilterSummaryData" /></th>
+                                    <th><input type="number" step="0.01" class="form-control form-control-sm" placeholder="Min..." @bind="SummaryFilters.QBBalanceMin" @oninput="FilterSummaryData" /></th>
+                                    <th><input type="text" class="form-control form-control-sm" placeholder="Filter Avi..." @bind="SummaryFilters.AviClientName" @oninput="FilterSummaryData" /></th>
+                                    <th><input type="number" step="0.01" class="form-control form-control-sm" placeholder="Min..." @bind="SummaryFilters.AviBalanceMin" @oninput="FilterSummaryData" /></th>
+                                    <th><input type="number" step="0.01" class="form-control form-control-sm" placeholder="Min..." @bind="SummaryFilters.VarianceMin" @oninput="FilterSummaryData" /></th>
+                                    <th><input type="text" class="form-control form-control-sm" placeholder="Payment..." @bind="SummaryFilters.PaymentType" @oninput="FilterSummaryData" /></th>
+                                    <th><input type="text" class="form-control form-control-sm" placeholder="Team..." @bind="SummaryFilters.Team" @oninput="FilterSummaryData" /></th>
+                                    <th><input type="text" class="form-control form-control-sm" placeholder="Rep..." @bind="SummaryFilters.PRRep" @oninput="FilterSummaryData" /></th>
+                                    <th><input type="text" class="form-control form-control-sm" placeholder="Send..." @bind="SummaryFilters.SendType" @oninput="FilterSummaryData" /></th>
+                                    <th><input type="text" class="form-control form-control-sm" placeholder="Account..." @bind="SummaryFilters.AccountType" @oninput="FilterSummaryData" /></th>
+                                    <th></th>
+                                    <th></th>
+                                    <th>
+                                        <select class="form-select form-select-sm" @bind="SummaryFilters.Status" @bind:event="oninput" @onchange="FilterSummaryData">
+                                            <option value="">All</option>
+                                            <option value="Complete">Complete</option>
+                                            <option value="Pending">Pending</option>
+                                            <option value="Review">Review</option>
+                                            <option value="Issue">Issue</option>
+                                        </select>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var summary in GetFilteredAndSortedSummaryData())
+                                {
+                                    <tr class="@GetVarianceRowClass(summary.Variance)">
+                                        <td><strong>@summary.ClientName</strong></td>
+                                        <td>@summary.QBBalance.ToString("C")</td>
+                                        <td>@summary.AviClientName</td>
+                                        <td>@summary.AviBalance.ToString("C")</td>
+                                        <td><strong>@summary.Variance.ToString("C")</strong></td>
+                                        <td>
+                                            <span class="badge @GetPaymentMethodClass(summary.PaymentType)">
+                                                @summary.PaymentType
+                                            </span>
+                                        </td>
+                                        <td>@summary.Team</td>
+                                        <td>@summary.PRRep</td>
+                                        <td>@summary.SendType</td>
+                                        <td>@summary.AccountType</td>
+                                        <td>
+                                            <input type="text" class="form-control form-control-sm" @bind="summary.BillingNotes" placeholder="Enter billing notes..." />
+                                        </td>
+                                        <td>
+                                            <input type="text" class="form-control form-control-sm" @bind="summary.Notes" placeholder="Enter notes..." />
+                                        </td>
+                                        <td>
+                                            <select class="form-select form-select-sm" @bind="summary.Status">
+                                                <option value="">Select...</option>
+                                                <option value="Complete">Complete</option>
+                                                <option value="Pending">Pending</option>
+                                                <option value="Review">Review</option>
+                                                <option value="Issue">Issue</option>
+                                            </select>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- Variances Tab -->
+        @if (ActiveTab == "variances")
+        {
+            <div class="card">
+                <div class="card-header">
+                    <h5>⚠️ BOUNCE - Variance Analysis</h5>
+                    <small class="text-muted">Click column headers to sort • Type in filter boxes to search</small>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead class="table-danger">
+                                <tr>
+                                    <th style="cursor: pointer;" @onclick="() => SortVariances(nameof(VarianceEntry.ClientName))">
+                                        Client
+                                        @if (VarianceSortColumn == nameof(VarianceEntry.ClientName))
+                                        {
+                                            <i class="fas fa-sort-@(VarianceSortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th style="cursor: pointer;" @onclick="() => SortVariances(nameof(VarianceEntry.EmployeeName))">
+                                        Employee
+                                        @if (VarianceSortColumn == nameof(VarianceEntry.EmployeeName))
+                                        {
+                                            <i class="fas fa-sort-@(VarianceSortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th style="cursor: pointer;" @onclick="() => SortVariances(nameof(VarianceEntry.JobSite))">
+                                        Job Site
+                                        @if (VarianceSortColumn == nameof(VarianceEntry.JobSite))
+                                        {
+                                            <i class="fas fa-sort-@(VarianceSortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th style="cursor: pointer;" @onclick="() => SortVariances(nameof(VarianceEntry.QBAmount))">
+                                        QB Amount
+                                        @if (VarianceSortColumn == nameof(VarianceEntry.QBAmount))
+                                        {
+                                            <i class="fas fa-sort-@(VarianceSortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th style="cursor: pointer;" @onclick="() => SortVariances(nameof(VarianceEntry.AvionteAmount))">
+                                        Avionte Amount
+                                        @if (VarianceSortColumn == nameof(VarianceEntry.AvionteAmount))
+                                        {
+                                            <i class="fas fa-sort-@(VarianceSortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th style="cursor: pointer;" @onclick="() => SortVariances(nameof(VarianceEntry.Variance))">
+                                        Variance
+                                        @if (VarianceSortColumn == nameof(VarianceEntry.Variance))
+                                        {
+                                            <i class="fas fa-sort-@(VarianceSortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th style="cursor: pointer;" @onclick="() => SortVariances(nameof(VarianceEntry.VarianceType))">
+                                        Type
+                                        @if (VarianceSortColumn == nameof(VarianceEntry.VarianceType))
+                                        {
+                                            <i class="fas fa-sort-@(VarianceSortAscending ? "up" : "down") ms-1"></i>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-sort ms-1 text-muted"></i>
+                                        }
+                                    </th>
+                                    <th>Notes</th>
+                                </tr>
+                                <!-- Filter Row -->
+                                <tr class="bg-light">
+                                    <th><input type="text" class="form-control form-control-sm" placeholder="Filter client..." @bind="VarianceFilters.ClientName" @oninput="FilterVarianceData" /></th>
+                                    <th><input type="text" class="form-control form-control-sm" placeholder="Filter employee..." @bind="VarianceFilters.EmployeeName" @oninput="FilterVarianceData" /></th>
+                                    <th><input type="text" class="form-control form-control-sm" placeholder="Filter job site..." @bind="VarianceFilters.JobSite" @oninput="FilterVarianceData" /></th>
+                                    <th><input type="number" step="0.01" class="form-control form-control-sm" placeholder="Min QB..." @bind="VarianceFilters.QBAmountMin" @oninput="FilterVarianceData" /></th>
+                                    <th><input type="number" step="0.01" class="form-control form-control-sm" placeholder="Min Avi..." @bind="VarianceFilters.AvionteAmountMin" @oninput="FilterVarianceData" /></th>
+                                    <th><input type="number" step="0.01" class="form-control form-control-sm" placeholder="Min variance..." @bind="VarianceFilters.VarianceMin" @oninput="FilterVarianceData" /></th>
+                                    <th><input type="text" class="form-control form-control-sm" placeholder="Type..." @bind="VarianceFilters.VarianceType" @oninput="FilterVarianceData" /></th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var variance in GetFilteredAndSortedVarianceData())
+                                {
+                                    <tr>
+                                        <td>@variance.ClientName</td>
+                                        <td>@variance.EmployeeName</td>
+                                        <td>@variance.JobSite</td>
+                                        <td>@variance.QBAmount.ToString("C")</td>
+                                        <td>@variance.AvionteAmount.ToString("C")</td>
+                                        <td><strong class="@GetVarianceTextClass(variance.Variance)">@variance.Variance.ToString("C")</strong></td>
+                                        <td><span class="badge bg-info">@variance.VarianceType</span></td>
+                                        <td>@variance.Notes</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- Pivot Tables Tab -->
+        @if (ActiveTab == "pivots")
+        {
+            <div class="row">
+                <!-- Pivot 1: QB Name, Item → Sum of Amount -->
+                <div class="col-md-6">
+                    <div class="card mb-3">
+                        <div class="card-header bg-primary text-white">
+                            <h6><strong>📊 Pivot 1:</strong> QuickBooks - Name, Item</h6>
+                            <small>Rows: Name, Item | Values: Sum of Amount | Clients: @ReconResults.QBNameItemHierarchical.Count</small>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                                <table class="table table-sm table-hover">
+                                    <thead class="table-primary sticky-top">
+                                        <tr>
+                                            <th style="width: 50%;">Client Name / Item</th>
+                                            <th>Sum of Amount</th>
+                                            <th>Count</th>
+                                            <th style="width: 40px;"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var group in ReconResults.QBNameItemHierarchical)
+                                        {
+                                            <!-- Client Group Row -->
+                                            <tr class="table-light fw-bold" style="cursor: pointer;" @onclick="() => ToggleHierarchicalGroup(group)">
+                                                <td>
+                                                    <span class="me-2" style="font-weight: bold; color: #0d6efd;">@(group.IsExpanded ? "−" : "+")</span>
+                                                    <strong>@group.GroupName</strong>
+                                                </td>
+                                                <td><strong>@group.TotalAmount.ToString("C")</strong></td>
+                                                <td><strong>@group.TotalCount</strong></td>
+                                                <td><small class="text-muted">@group.Children.Count</small></td>
+                                            </tr>
+                                            
+                                            <!-- Child Item Rows (shown when expanded) -->
+                                            @if (group.IsExpanded)
+                                            {
+                                                @foreach (var item in group.Children)
+                                                {
+                                                    <tr>
+                                                        <td class="ps-4">
+                                                            <i class="fas fa-dot-circle me-2 text-muted" style="font-size: 0.6em;"></i>
+                                                            @item.Key
+                                                        </td>
+                                                        <td>@item.Amount.ToString("C")</td>
+                                                        <td>@item.Count</td>
+                                                        <td></td>
+                                                    </tr>
+                                                }
+                                            }
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pivot 3: QB Rep, Name -->
+                <div class="col-md-6">
+                    <div class="card mb-3">
+                        <div class="card-header bg-success text-white">
+                            <h6><strong>� Pivot 3:</strong> QuickBooks - Rep, Name</h6>
+                            <small>Rows: Rep, Name | Values: Sum of Amount | Reps: @ReconResults.QBRepClientHierarchical.Count</small>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                                <table class="table table-sm table-hover">
+                                    <thead class="table-success sticky-top">
+                                        <tr>
+                                            <th style="width: 50%;">Rep / Client Name</th>
+                                            <th>Sum of Amount</th>
+                                            <th>Count</th>
+                                            <th style="width: 40px;"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var group in ReconResults.QBRepClientHierarchical)
+                                        {
+                                            <!-- Rep Group Row -->
+                                            <tr class="table-light fw-bold" style="cursor: pointer;" @onclick="() => ToggleHierarchicalGroup(group)">
+                                                <td>
+                                                    <span class="me-2" style="font-weight: bold; color: #198754;">@(group.IsExpanded ? "−" : "+")</span>
+                                                    <strong>@group.GroupName</strong>
+                                                </td>
+                                                <td><strong>@group.TotalAmount.ToString("C")</strong></td>
+                                                <td><strong>@group.TotalCount</strong></td>
+                                                <td><small class="text-muted">@group.Children.Count clients</small></td>
+                                            </tr>
+                                            
+                                            <!-- Child Client Rows (shown when expanded) -->
+                                            @if (group.IsExpanded)
+                                            {
+                                                @foreach (var client in group.Children)
+                                                {
+                                                    <tr>
+                                                        <td class="ps-4">
+                                                            <i class="fas fa-building me-2 text-muted" style="font-size: 0.8em;"></i>
+                                                            @client.Key
+                                                        </td>
+                                                        <td>@client.Amount.ToString("C")</td>
+                                                        <td>@client.Count</td>
+                                                        <td></td>
+                                                    </tr>
+                                                }
+                                            }
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="row">
+                <!-- Pivot 2: Avionte Bill To Name, Name → Sum of Item Bill -->
+                <div class="col-md-6">
+                    <div class="card mb-3">
+                        <div class="card-header bg-info text-white">
+                            <h6><strong>� Pivot 2:</strong> Avionte - Bill To Name, Name</h6>
+                            <small>Rows: Bill To Name, Name | Values: Sum of Item Bill | Clients: @ReconResults.AvionteBillToNameHierarchical.Count</small>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                                <table class="table table-sm table-hover">
+                                    <thead class="table-info sticky-top">
+                                        <tr>
+                                            <th style="width: 50%;">Client Name / Employee</th>
+                                            <th>Sum of Item Bill</th>
+                                            <th>Record Count</th>
+                                            <th style="width: 40px;"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var group in ReconResults.AvionteBillToNameHierarchical)
+                                        {
+                                            <!-- Client Group Row -->
+                                            <tr class="table-light fw-bold" style="cursor: pointer;" @onclick="() => ToggleHierarchicalGroup(group)">
+                                                <td>
+                                                    <span class="me-2" style="font-weight: bold; color: #0dcaf0;">@(group.IsExpanded ? "−" : "+")</span>
+                                                    <strong>@group.GroupName</strong>
+                                                </td>
+                                                <td><strong>@group.TotalAmount.ToString("C")</strong></td>
+                                                <td><strong>@group.TotalCount</strong></td>
+                                                <td><small class="text-muted">@group.Children.Count</small></td>
+                                            </tr>
+                                            
+                                            <!-- Child Employee Rows (shown when expanded) -->
+                                            @if (group.IsExpanded)
+                                            {
+                                                @foreach (var emp in group.Children)
+                                                {
+                                                    <tr>
+                                                        <td class="ps-4">
+                                                            <i class="fas fa-user me-2 text-muted" style="font-size: 0.8em;"></i>
+                                                            @emp.Key
+                                                        </td>
+                                                        <td>@emp.Amount.ToString("C")</td>
+                                                        <td>@emp.Count</td>
+                                                        <td></td>
+                                                    </tr>
+                                                }
+                                            }
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pivot 4: QB Employee, Job Site -->
+                <div class="col-md-6">
+                    <div class="card mb-3">
+                        <div class="card-header bg-warning text-dark">
+                            <h6><strong>🏢 Pivot 4:</strong> QuickBooks - Employee, Job Site</h6>
+                            <small>Rows: Employee, Job Site | Values: Sum of Amount | Records: @ReconResults.QBEmployeeJobSitePivot.Count</small>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                                <table class="table table-sm table-hover">
+                                    <thead class="table-warning sticky-top">
+                                        <tr>
+                                            <th>Employee - Job Site</th>
+                                            <th>Sum of Amount</th>
+                                            <th>Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var pivot in ReconResults.QBEmployeeJobSitePivot)
+                                        {
+                                            <tr>
+                                                <td>@pivot.Key</td>
+                                                <td><strong>@pivot.Amount.ToString("C")</strong></td>
+                                                <td>@pivot.Count</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Summary Statistics -->
+            <div class="row">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header bg-secondary text-white">
+                            <h6 class="mb-0">📊 Pivot Tables Summary</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="row text-center">
+                                <div class="col-md-3">
+                                    <div class="border rounded p-3 bg-light">
+                                        <h5 class="text-primary">@ReconResults.QBNameItemHierarchical.Count</h5>
+                                        <small>QB Clients with @ReconResults.QBNameItemHierarchical.Sum(g => g.Children.Count) Items</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="border rounded p-3 bg-light">
+                                        <h5 class="text-info">@ReconResults.AvionteBillToNameHierarchical.Count</h5>
+                                        <small>Avionte Clients with @ReconResults.AvionteBillToNameHierarchical.Sum(g => g.Children.Count) Employees</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="border rounded p-3 bg-light">
+                                        <h5 class="text-success">@ReconResults.QBRepClientHierarchical.Count</h5>
+                                        <small>QB Reps with @ReconResults.QBRepClientHierarchical.Sum(g => g.Children.Count)</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="border rounded p-3 bg-light">
+                                        <h5 class="text-warning">@ReconResults.QBEmployeeJobSitePivot.Count</h5>
+                                        <small>QB Employee/Job Site Combinations</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- Payment Methods Tab -->
+        @if (ActiveTab == "deposits")
+        {
+            <div class="card">
+                <div class="card-header">
+                    <h5>💳 Deposit Details - Payment Methods</h5>
+                </div>
+                <div class="card-body">
+                    @if (ReconResults.DepositDetails.Any())
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead class="table-info">
+                                    <tr>
+                                        <th>Client Name</th>
+                                        <th>Payment Method</th>
+                                        <th>Amount</th>
+                                        <th>Date</th>
+                                        <th>Check Number</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var deposit in ReconResults.DepositDetails)
+                                    {
+                                        <tr>
+                                            <td>@deposit.ClientName</td>
+                                            <td>
+                                                <span class="badge @GetPaymentMethodClass(deposit.PaymentMethod)">
+                                                    @deposit.PaymentMethod
+                                                </span>
+                                            </td>
+                                            <td>@deposit.Amount.ToString("C")</td>
+                                            <td>@deposit.Date.ToShortDateString()</td>
+                                            <td>@deposit.CheckNumber</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i> No deposit detail file uploaded. Payment methods will show "Research pymt method" for all clients.
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private string StatusMessage = "";
+    private bool IsError = false;
+    private string ActiveTab = "summary";
+    private List<QuickBooksEntry> QBEntries = new();
+    private List<AvionteEntry> AvionteEntries = new();
+    private List<DepositDetailEntry> DepositDetails = new();
+    private ReconResults? ReconResults;
+
+    // Summary sorting and filtering
+    private string SummarySortColumn = "";
+    private bool SummarySortAscending = true;
+    private SummaryFilterModel SummaryFilters = new();
+
+    // Variance sorting and filtering  
+    private string VarianceSortColumn = nameof(VarianceEntry.Variance);
+    private bool VarianceSortAscending = false; // Default to largest variance first
+    private VarianceFilterModel VarianceFilters = new();
+
+    private bool CanProcessRecon => QBEntries.Any() && AvionteEntries.Any();
+
+    private async Task HandleQBFile(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024); // 10MB max
+        using var memoryStream = new MemoryStream();
+        await stream.CopyToAsync(memoryStream);
+
+        try
+        {
+            QBEntries = ExcelService.ProcessQB(memoryStream.ToArray());
+            StatusMessage = $"✅ Processed QuickBooks file: {QBEntries.Count} entries found.";
+            IsError = false;
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"❌ Error processing QuickBooks file: {ex.Message}";
+            IsError = true;
+            QBEntries = new List<QuickBooksEntry>();
+        }
+    }
+
+    private async Task HandleAvionteFile(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024); // 10MB max
+        using var memoryStream = new MemoryStream();
+        await stream.CopyToAsync(memoryStream);
+
+        try
+        {
+            AvionteEntries = ExcelService.ProcessAvionte(memoryStream.ToArray());
+            StatusMessage = $"✅ Processed Avionte file: {AvionteEntries.Count} entries found.";
+            IsError = false;
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"❌ Error processing Avionte file: {ex.Message}";
+            IsError = true;
+            AvionteEntries = new List<AvionteEntry>();
+        }
+    }
+
+    private async Task HandleDepositFile(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024); // 10MB max
+        using var memoryStream = new MemoryStream();
+        await stream.CopyToAsync(memoryStream);
+
+        try
+        {
+            DepositDetails = ReconService.ProcessDepositDetail(memoryStream.ToArray());
+            StatusMessage = $"✅ Processed Deposit Detail file: {DepositDetails.Count} entries found.";
+            IsError = false;
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"❌ Error processing Deposit Detail file: {ex.Message}";
+            IsError = true;
+            DepositDetails = new List<DepositDetailEntry>();
+        }
+    }
+
+    private void ProcessRecon()
+    {
+        try
+        {
+            ReconResults = ReconService.ProcessRecon(QBEntries, AvionteEntries, DepositDetails);
+            StatusMessage = $"✅ Reconciliation completed successfully! Found {ReconResults.Variances.Count} variances across {ReconResults.ClientSummaries.Count} clients.";
+            IsError = false;
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"❌ Error during reconciliation: {ex.Message}";
+            IsError = true;
+        }
+    }
+
+    private void ClearData()
+    {
+        QBEntries = new List<QuickBooksEntry>();
+        AvionteEntries = new List<AvionteEntry>();
+        DepositDetails = new List<DepositDetailEntry>();
+        ReconResults = null;
+        StatusMessage = "🗑️ All data cleared. Ready for new files.";
+        IsError = false;
+    }
+
+    private void SetActiveTab(string tab)
+    {
+        ActiveTab = tab;
+    }
+
+    private string GetAlertClass() => IsError ? "alert-danger" : "alert-success";
+
+    private string GetVarianceRowClass(decimal variance)
+    {
+        if (Math.Abs(variance) > 100) return "table-danger";
+        if (Math.Abs(variance) > 10) return "table-warning";
+        return "";
+    }
+
+    private string GetVarianceTextClass(decimal variance)
+    {
+        if (variance > 0) return "text-success";
+        if (variance < 0) return "text-danger";
+        return "text-muted";
+    }
+
+    private string GetPaymentMethodClass(string method)
+    {
+        return method switch
+        {
+            "Check" => "bg-primary",
+            "ACH" => "bg-success",
+            _ => "bg-warning"
+        };
+    }
+
+    // Hierarchical pivot group toggle method
+    private void ToggleHierarchicalGroup(HierarchicalPivotGroup group)
+    {
+        group.IsExpanded = !group.IsExpanded;
+    }
+
+    // Summary sorting and filtering methods
+    private void SortSummary(string columnName)
+    {
+        if (SummarySortColumn == columnName)
+        {
+            SummarySortAscending = !SummarySortAscending;
+        }
+        else
+        {
+            SummarySortColumn = columnName;
+            SummarySortAscending = true;
+        }
+    }
+
+    private void FilterSummaryData()
+    {
+        StateHasChanged();
+    }
+
+    private IEnumerable<ClientSummary> GetFilteredAndSortedSummaryData()
+    {
+        if (ReconResults?.ClientSummaries == null) return new List<ClientSummary>();
+
+        var filtered = ReconResults.ClientSummaries.Where(s =>
+            (string.IsNullOrEmpty(SummaryFilters.ClientName) || s.ClientName.Contains(SummaryFilters.ClientName, StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrEmpty(SummaryFilters.AviClientName) || s.AviClientName.Contains(SummaryFilters.AviClientName, StringComparison.OrdinalIgnoreCase)) &&
+            (SummaryFilters.QBBalanceMin == null || s.QBBalance >= SummaryFilters.QBBalanceMin) &&
+            (SummaryFilters.AviBalanceMin == null || s.AviBalance >= SummaryFilters.AviBalanceMin) &&
+            (SummaryFilters.VarianceMin == null || Math.Abs(s.Variance) >= Math.Abs(SummaryFilters.VarianceMin.Value)) &&
+            (string.IsNullOrEmpty(SummaryFilters.PaymentType) || s.PaymentType.Contains(SummaryFilters.PaymentType, StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrEmpty(SummaryFilters.Team) || s.Team.Contains(SummaryFilters.Team, StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrEmpty(SummaryFilters.PRRep) || s.PRRep.Contains(SummaryFilters.PRRep, StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrEmpty(SummaryFilters.SendType) || s.SendType.Contains(SummaryFilters.SendType, StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrEmpty(SummaryFilters.AccountType) || s.AccountType.Contains(SummaryFilters.AccountType, StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrEmpty(SummaryFilters.Status) || s.Status == SummaryFilters.Status)
+        );
+
+        return SummarySortColumn switch
+        {
+            nameof(ClientSummary.ClientName) => SummarySortAscending ? filtered.OrderBy(s => s.ClientName) : filtered.OrderByDescending(s => s.ClientName),
+            nameof(ClientSummary.QBBalance) => SummarySortAscending ? filtered.OrderBy(s => s.QBBalance) : filtered.OrderByDescending(s => s.QBBalance),
+            nameof(ClientSummary.AviClientName) => SummarySortAscending ? filtered.OrderBy(s => s.AviClientName) : filtered.OrderByDescending(s => s.AviClientName),
+            nameof(ClientSummary.AviBalance) => SummarySortAscending ? filtered.OrderBy(s => s.AviBalance) : filtered.OrderByDescending(s => s.AviBalance),
+            nameof(ClientSummary.Variance) => SummarySortAscending ? filtered.OrderBy(s => s.Variance) : filtered.OrderByDescending(s => s.Variance),
+            nameof(ClientSummary.PaymentType) => SummarySortAscending ? filtered.OrderBy(s => s.PaymentType) : filtered.OrderByDescending(s => s.PaymentType),
+            nameof(ClientSummary.Team) => SummarySortAscending ? filtered.OrderBy(s => s.Team) : filtered.OrderByDescending(s => s.Team),
+            nameof(ClientSummary.PRRep) => SummarySortAscending ? filtered.OrderBy(s => s.PRRep) : filtered.OrderByDescending(s => s.PRRep),
+            nameof(ClientSummary.SendType) => SummarySortAscending ? filtered.OrderBy(s => s.SendType) : filtered.OrderByDescending(s => s.SendType),
+            nameof(ClientSummary.AccountType) => SummarySortAscending ? filtered.OrderBy(s => s.AccountType) : filtered.OrderByDescending(s => s.AccountType),
+            nameof(ClientSummary.Status) => SummarySortAscending ? filtered.OrderBy(s => s.Status) : filtered.OrderByDescending(s => s.Status),
+            _ => filtered
+        };
+    }
+
+    // Variance sorting and filtering methods
+    private void SortVariances(string columnName)
+    {
+        if (VarianceSortColumn == columnName)
+        {
+            VarianceSortAscending = !VarianceSortAscending;
+        }
+        else
+        {
+            VarianceSortColumn = columnName;
+            VarianceSortAscending = true;
+        }
+    }
+
+    private void FilterVarianceData()
+    {
+        StateHasChanged();
+    }
+
+    private IEnumerable<VarianceEntry> GetFilteredAndSortedVarianceData()
+    {
+        if (ReconResults?.Variances == null) return new List<VarianceEntry>();
+
+        var filtered = ReconResults.Variances.Where(v =>
+            (string.IsNullOrEmpty(VarianceFilters.ClientName) || v.ClientName.Contains(VarianceFilters.ClientName, StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrEmpty(VarianceFilters.EmployeeName) || v.EmployeeName.Contains(VarianceFilters.EmployeeName, StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrEmpty(VarianceFilters.JobSite) || v.JobSite.Contains(VarianceFilters.JobSite, StringComparison.OrdinalIgnoreCase)) &&
+            (VarianceFilters.QBAmountMin == null || v.QBAmount >= VarianceFilters.QBAmountMin) &&
+            (VarianceFilters.AvionteAmountMin == null || v.AvionteAmount >= VarianceFilters.AvionteAmountMin) &&
+            (VarianceFilters.VarianceMin == null || Math.Abs(v.Variance) >= Math.Abs(VarianceFilters.VarianceMin.Value)) &&
+            (string.IsNullOrEmpty(VarianceFilters.VarianceType) || v.VarianceType.Contains(VarianceFilters.VarianceType, StringComparison.OrdinalIgnoreCase))
+        );
+
+        return VarianceSortColumn switch
+        {
+            nameof(VarianceEntry.ClientName) => VarianceSortAscending ? filtered.OrderBy(v => v.ClientName) : filtered.OrderByDescending(v => v.ClientName),
+            nameof(VarianceEntry.EmployeeName) => VarianceSortAscending ? filtered.OrderBy(v => v.EmployeeName) : filtered.OrderByDescending(v => v.EmployeeName),
+            nameof(VarianceEntry.JobSite) => VarianceSortAscending ? filtered.OrderBy(v => v.JobSite) : filtered.OrderByDescending(v => v.JobSite),
+            nameof(VarianceEntry.QBAmount) => VarianceSortAscending ? filtered.OrderBy(v => v.QBAmount) : filtered.OrderByDescending(v => v.QBAmount),
+            nameof(VarianceEntry.AvionteAmount) => VarianceSortAscending ? filtered.OrderBy(v => v.AvionteAmount) : filtered.OrderByDescending(v => v.AvionteAmount),
+            nameof(VarianceEntry.Variance) => VarianceSortAscending ? filtered.OrderBy(v => Math.Abs(v.Variance)) : filtered.OrderByDescending(v => Math.Abs(v.Variance)),
+            nameof(VarianceEntry.VarianceType) => VarianceSortAscending ? filtered.OrderBy(v => v.VarianceType) : filtered.OrderByDescending(v => v.VarianceType),
+            _ => filtered.OrderByDescending(v => Math.Abs(v.Variance)) // Default sort by largest variance
+        };
+    }
+
+    // Filter model classes
+    public class SummaryFilterModel
+    {
+        public string ClientName { get; set; } = "";
+        public string AviClientName { get; set; } = "";
+        public decimal? QBBalanceMin { get; set; }
+        public decimal? AviBalanceMin { get; set; }
+        public decimal? VarianceMin { get; set; }
+        public string PaymentType { get; set; } = "";
+        public string Team { get; set; } = "";
+        public string PRRep { get; set; } = "";
+        public string SendType { get; set; } = "";
+        public string AccountType { get; set; } = "";
+        public string Status { get; set; } = "";
+    }
+
+    public class VarianceFilterModel
+    {
+        public string ClientName { get; set; } = "";
+        public string EmployeeName { get; set; } = "";
+        public string JobSite { get; set; } = "";
+        public decimal? QBAmountMin { get; set; }
+        public decimal? AvionteAmountMin { get; set; }
+        public decimal? VarianceMin { get; set; }
+        public string VarianceType { get; set; } = "";
+    }
+}

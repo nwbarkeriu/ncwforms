@@ -1,0 +1,127 @@
+﻿@page "/upload"
+@page "/index"
+@using JobCompareApp.Models
+@using JobCompareApp.Services
+@inject IJSRuntime JS
+
+<h3>Upload Files</h3>
+
+<div>
+    <label>QuickBooks File:</label>
+    <InputFile OnChange="HandleQBFile" />
+</div>
+<div class="mt-2">
+    <label>Avionte File:</label>
+    <InputFile OnChange="HandleAvionteFile" />
+</div>
+
+@if (!string.IsNullOrEmpty(StatusMessage))
+{
+    <p class="mt-3">@StatusMessage</p>
+}
+
+@if (QBEntries?.Any() == true)
+{
+    <h4 class="mt-4">QuickBooks Entries</h4>
+    <table class="table table-bordered">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Memo</th>
+                <th>Item</th>
+                <th>Sales Price</th>
+                <th>Type</th>
+                <th>Account</th>
+                <th>Rep</th>
+                <th>PO #</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var entry in QBEntries)
+            {
+                <tr>
+                    <td>@entry.Name</td>
+                    <td>@entry.Memo</td>
+                    <td>@entry.Item</td>
+                    <td>@entry.SalesPrice</td>
+                    <td>@entry.Type</td>
+                    <td>@entry.Account</td>
+                    <td>@entry.Rep</td>
+                    <td>@entry.PONumber</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@if (AvionteEntries?.Any() == true)
+{
+    <h4 class="mt-4">Avionte Entries</h4>
+    <table class="table table-bordered">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Bill To Name</th>
+                <th>Item Bill</th>
+                <th>Item Pay</th>
+                <th>Week Worked</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var entry in AvionteEntries)
+            {
+                <tr>
+                    <td>@entry.Name</td>
+                    <td>@entry.BillToName</td>
+                    <td>@entry.ItemBill</td>
+                    <td>@entry.ItemPay</td>
+                    <td>@entry.WeekWorked.ToShortDateString()</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private string StatusMessage = string.Empty;
+    private List<QuickBooksEntry> QBEntries = new();
+    private List<AvionteEntry> AvionteEntries = new();
+
+    private async Task HandleQBFile(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        using var stream = file.OpenReadStream();
+        using var memoryStream = new MemoryStream();
+        await stream.CopyToAsync(memoryStream);
+
+        try
+        {
+            QBEntries = ExcelService.ProcessQB(memoryStream.ToArray());
+            StatusMessage = $"Processed QuickBooks file: {QBEntries.Count} entries found.";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error processing QuickBooks file: {ex.Message}";
+            QBEntries = new List<QuickBooksEntry>();
+        }
+    }
+
+    private async Task HandleAvionteFile(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        using var stream = file.OpenReadStream();
+        using var memoryStream = new MemoryStream();
+        await stream.CopyToAsync(memoryStream);
+
+        try
+        {
+            AvionteEntries = ExcelService.ProcessAvionte(memoryStream.ToArray());
+            StatusMessage = $"Processed Avionte file: {AvionteEntries.Count} entries found.";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error processing Avionte file: {ex.Message}";
+            AvionteEntries = new List<AvionteEntry>();
+        }
+    }
+}
