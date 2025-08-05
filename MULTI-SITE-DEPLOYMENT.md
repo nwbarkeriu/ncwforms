@@ -1,6 +1,6 @@
-# 🚀 JobCompare Multi-Site Deployment Guide
+# 🚀 NCWForms Multi-Site Deployment Guide
 
-Deploying JobCompare (ncwforms) on an existing droplet that already runs bin-buddies.
+Deploying NCWForms on an existing droplet that already runs bin-buddies.
 
 ## 📋 Prerequisites ✅
 
@@ -10,9 +10,9 @@ Since your droplet already has:
 - ✅ Firewall configured
 - ✅ bin-buddies site running
 
-We only need to add JobCompare as a second application.
+We only need to add NCWForms as a second application.
 
-## 🔧 Step 1: Clone JobCompare Repository
+## 🔧 Step 1: Clone NCWForms Repository
 
 ```bash
 # SSH into your droplet
@@ -21,21 +21,21 @@ ssh root@YOUR_DROPLET_IP
 # Navigate to web directory (assuming similar structure to bin-buddies)
 cd /var/www
 
-# Clone JobCompare repository
-sudo git clone https://github.com/nwbarkeriu/ncwforms.git jobcompare
+# Clone NCWForms repository
+sudo git clone https://github.com/nwbarkeriu/ncwforms.git ncwforms
 
 # Set proper ownership
-sudo chown -R www-data:www-data /var/www/jobcompare
+sudo chown -R www-data:www-data /var/www/ncwforms
 
 # Navigate to project
-cd /var/www/jobcompare
+cd /var/www/ncwforms
 ```
 
-## 🔨 Step 2: Build JobCompare Application
+## 🔨 Step 2: Build NCWForms Application
 
 ```bash
 # Navigate to project directory
-cd /var/www/jobcompare
+cd /var/www/ncwforms
 
 # Restore dependencies
 dotnet restore
@@ -49,22 +49,22 @@ dotnet run --urls="http://localhost:5001" &
 # Kill test: pkill -f JobCompare
 ```
 
-## 🔄 Step 3: Create JobCompare Systemd Service
+## 🔄 Step 3: Create NCWForms Systemd Service
 
 ```bash
-# Create service file for JobCompare
-sudo nano /etc/systemd/system/jobcompare.service
+# Create service file for NCWForms
+sudo nano /etc/systemd/system/ncwforms.service
 ```
 
 Add the following content:
 ```ini
 [Unit]
-Description=JobCompare Reconciliation Dashboard
+Description=NCWForms Reconciliation Dashboard
 After=network.target
 
 [Service]
 Type=notify
-ExecStart=/usr/bin/dotnet /var/www/jobcompare/bin/Release/net7.0/JobCompare.dll
+ExecStart=/usr/bin/dotnet /var/www/ncwforms/bin/Release/net7.0/JobCompare.dll
 Restart=always
 RestartSec=5
 TimeoutStopSec=90
@@ -74,7 +74,7 @@ Group=www-data
 Environment=ASPNETCORE_ENVIRONMENT=Production
 Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
 Environment=ASPNETCORE_URLS=http://localhost:5001
-WorkingDirectory=/var/www/jobcompare
+WorkingDirectory=/var/www/ncwforms
 
 [Install]
 WantedBy=multi-user.target
@@ -85,11 +85,11 @@ WantedBy=multi-user.target
 ```bash
 # Enable and start the service
 sudo systemctl daemon-reload
-sudo systemctl enable jobcompare
-sudo systemctl start jobcompare
+sudo systemctl enable ncwforms
+sudo systemctl start ncwforms
 
 # Check status
-sudo systemctl status jobcompare
+sudo systemctl status ncwforms
 ```
 
 ## 🌐 Step 4: Configure Nginx for Multiple Sites
@@ -98,15 +98,15 @@ sudo systemctl status jobcompare
 If you want `jobcompare.yourdomain.com` and `binbuddies.yourdomain.com`:
 
 ```bash
-# Create JobCompare site config
-sudo nano /etc/nginx/sites-available/jobcompare
+# Create NCWForms site config
+sudo nano /etc/nginx/sites-available/ncwforms
 ```
 
 Add configuration:
 ```nginx
 server {
     listen 80;
-    server_name jobcompare.yourdomain.com;  # Replace with your subdomain
+    server_name ncwforms.yourdomain.com;  # Replace with your subdomain
     
     location / {
         proxy_pass http://localhost:5001;
@@ -123,7 +123,7 @@ server {
 ```
 
 ### Option B: Path-Based Setup
-If you want `yourdomain.com/jobcompare` and `yourdomain.com/binbuddies`:
+If you want `yourdomain.com/ncwforms` and `yourdomain.com/binbuddies`:
 
 ```bash
 # Edit your existing Nginx config (likely in sites-available)
@@ -132,7 +132,7 @@ sudo nano /etc/nginx/sites-available/default
 sudo nano /etc/nginx/sites-available/binbuddies
 ```
 
-Add JobCompare location block to existing server block:
+Add NCWForms location block to existing server block:
 ```nginx
 server {
     listen 80;
@@ -144,8 +144,8 @@ server {
         # ... existing proxy settings
     }
     
-    # New JobCompare location
-    location /jobcompare {
+    # New NCWForms location
+    location /ncwforms {
         proxy_pass http://localhost:5001;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -168,8 +168,8 @@ server {
 
 **For Option A (Subdomain):**
 ```bash
-# Enable JobCompare site
-sudo ln -s /etc/nginx/sites-available/jobcompare /etc/nginx/sites-enabled/
+# Enable NCWForms site
+sudo ln -s /etc/nginx/sites-available/ncwforms /etc/nginx/sites-enabled/
 
 # Test configuration
 sudo nginx -t
@@ -189,11 +189,11 @@ sudo systemctl reload nginx
 
 ## 🔧 Step 5: Update Application Configuration (If Needed)
 
-If using path-based routing, update JobCompare's base path:
+If using path-based routing, update NCWForms's base path:
 
 ```bash
 # Edit Program.cs if needed for path-based routing
-sudo nano /var/www/jobcompare/Program.cs
+sudo nano /var/www/ncwforms/Program.cs
 ```
 
 You might need to add path base configuration, but the current setup should work as-is.
@@ -203,18 +203,18 @@ You might need to add path base configuration, but the current setup should work
 ```bash
 # Check both services
 sudo systemctl status binbuddies
-sudo systemctl status jobcompare
+sudo systemctl status ncwforms
 
 # Check ports are listening
 sudo netstat -tlnp | grep :5000  # bin-buddies
-sudo netstat -tlnp | grep :5001  # jobcompare
+sudo netstat -tlnp | grep :5001  # ncwforms
 
 # Check Nginx configuration
 sudo nginx -t
 
 # Test applications
 curl http://localhost:5000  # bin-buddies
-curl http://localhost:5001  # jobcompare
+curl http://localhost:5001  # ncwforms
 ```
 
 ## 🔒 Step 7: SSL Certificates (If Using Subdomains)
@@ -222,8 +222,8 @@ curl http://localhost:5001  # jobcompare
 If you chose subdomain setup and want SSL:
 
 ```bash
-# Add SSL for JobCompare subdomain
-sudo certbot --nginx -d jobcompare.yourdomain.com
+# Add SSL for NCWForms subdomain
+sudo certbot --nginx -d ncwforms.yourdomain.com
 
 # Verify both certificates
 sudo certbot certificates
@@ -232,33 +232,33 @@ sudo certbot certificates
 ## 📊 Step 8: Monitoring Both Applications
 
 ```bash
-# View JobCompare logs
-sudo journalctl -u jobcompare -f
+# View NCWForms logs
+sudo journalctl -u ncwforms -f
 
 # View bin-buddies logs
 sudo journalctl -u binbuddies -f
 
 # Monitor both applications
-sudo systemctl status jobcompare binbuddies
+sudo systemctl status ncwforms binbuddies
 ```
 
 ## 🔄 Step 9: Future Updates
 
-### Update JobCompare:
+### Update NCWForms:
 ```bash
-cd /var/www/jobcompare
+cd /var/www/ncwforms
 git pull origin main
 dotnet build --configuration Release
-sudo systemctl restart jobcompare
+sudo systemctl restart ncwforms
 ```
 
 ### Update Both Applications:
 ```bash
-# Update JobCompare
-cd /var/www/jobcompare
+# Update NCWForms
+cd /var/www/ncwforms
 git pull origin main
 dotnet build --configuration Release
-sudo systemctl restart jobcompare
+sudo systemctl restart ncwforms
 
 # Update bin-buddies (adjust path as needed)
 cd /var/www/binbuddies
@@ -271,11 +271,11 @@ sudo systemctl restart binbuddies
 
 ### Option A - Subdomains:
 - **bin-buddies**: `https://binbuddies.yourdomain.com`
-- **JobCompare**: `https://jobcompare.yourdomain.com/recon`
+- **NCWForms**: `https://ncwforms.yourdomain.com/recon`
 
 ### Option B - Paths:
 - **bin-buddies**: `https://yourdomain.com/binbuddies`
-- **JobCompare**: `https://yourdomain.com/jobcompare/recon`
+- **NCWForms**: `https://yourdomain.com/ncwforms/recon`
 
 ## 🚨 Quick Troubleshooting
 
@@ -285,28 +285,28 @@ sudo systemctl restart binbuddies
 sudo netstat -tlnp | grep :5000
 sudo netstat -tlnp | grep :5001
 
-# If port conflict, change JobCompare port in service file
-sudo nano /etc/systemd/system/jobcompare.service
+# If port conflict, change NCWForms port in service file
+sudo nano /etc/systemd/system/ncwforms.service
 # Change to available port like 5002, 5003, etc.
 ```
 
 ### Service Issues:
 ```bash
 # Restart services
-sudo systemctl restart jobcompare
+sudo systemctl restart ncwforms
 sudo systemctl restart nginx
 
 # Check logs
-sudo journalctl -u jobcompare --no-pager
+sudo journalctl -u ncwforms --no-pager
 ```
 
 ## ✅ Quick Setup Checklist
 
-- [ ] Repository cloned to `/var/www/jobcompare`
+- [ ] Repository cloned to `/var/www/ncwforms`
 - [ ] Application built successfully
-- [ ] JobCompare service created and running on port 5001
+- [ ] NCWForms service created and running on port 5001
 - [ ] Nginx configured for both applications
 - [ ] Both applications accessible
 - [ ] SSL certificates updated (if using subdomains)
 
-Your droplet now runs both bin-buddies and JobCompare! 🎉
+Your droplet now runs both bin-buddies and NCWForms! 🎉
