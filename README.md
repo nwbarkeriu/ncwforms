@@ -40,7 +40,7 @@ A comprehensive ASP.NET Core Blazor Server application for automating reconcilia
 
 ## Technical Stack
 
-- **Framework**: ASP.NET Core 7.0 Blazor Server
+- **Framework**: ASP.NET Core 8.0 Blazor Server
 - **Excel Processing**: ClosedXML library
 - **UI Framework**: Bootstrap 5 with custom styling
 - **Data Processing**: LINQ with hierarchical grouping
@@ -49,7 +49,7 @@ A comprehensive ASP.NET Core Blazor Server application for automating reconcilia
 ## Getting Started
 
 ### Prerequisites
-- .NET 7.0 SDK or later
+- .NET 8.0 SDK or later
 - Visual Studio 2022 or VS Code
 
 ### Installation

@@ -5,7 +5,7 @@ Deploying NCWForms on an existing droplet that already runs bin-buddies.
 ## 📋 Prerequisites ✅
 
 Since your droplet already has:
-- ✅ .NET 7 SDK installed
+- ✅ .NET 8 SDK installed
 - ✅ Nginx configured and running
 - ✅ Firewall configured
 - ✅ bin-buddies site running
@@ -27,6 +27,12 @@ sudo git clone https://github.com/nwbarkeriu/ncwforms.git ncwforms
 # Set proper ownership
 sudo chown -R www-data:www-data /var/www/ncwforms
 
+# Move project files to eliminate nested structure
+cd /var/www/ncwforms
+sudo mv ncwforms/* .
+sudo mv ncwforms/.[^.]* . 2>/dev/null || true
+sudo rmdir ncwforms
+
 # Navigate to project
 cd /var/www/ncwforms
 ```
@@ -36,6 +42,15 @@ cd /var/www/ncwforms
 ```bash
 # Navigate to project directory
 cd /var/www/ncwforms
+
+# Check what .NET versions are available
+dotnet --list-runtimes
+
+# Check project target framework
+cat *.csproj | grep TargetFramework
+
+# If needed, update to match available runtime (e.g., net8.0)
+# sed -i 's/<TargetFramework>net7.0<\/TargetFramework>/<TargetFramework>net8.0<\/TargetFramework>/g' *.csproj
 
 # Restore dependencies
 dotnet restore
@@ -64,7 +79,7 @@ After=network.target
 
 [Service]
 Type=notify
-ExecStart=/usr/bin/dotnet /var/www/ncwforms/bin/Release/net7.0/JobCompare.dll
+ExecStart=/usr/bin/dotnet /var/www/ncwforms/bin/Release/net8.0/JobCompare.dll
 Restart=always
 RestartSec=5
 TimeoutStopSec=90
@@ -74,6 +89,8 @@ Group=www-data
 Environment=ASPNETCORE_ENVIRONMENT=Production
 Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
 Environment=ASPNETCORE_URLS=http://localhost:5001
+Environment=DOTNET_CLI_HOME=/var/www/.dotnet
+Environment=HOME=/home/www-data
 WorkingDirectory=/var/www/ncwforms
 
 [Install]
@@ -83,6 +100,15 @@ WantedBy=multi-user.target
 **Note**: Using port 5001 to avoid conflicts with bin-buddies (likely on 5000)
 
 ```bash
+# Fix .NET permissions for www-data user
+sudo mkdir -p /var/www/.dotnet
+sudo chown -R www-data:www-data /var/www/.dotnet
+sudo chmod -R 755 /var/www/.dotnet
+
+# Also set DOTNET_CLI_HOME to avoid permission issues
+sudo mkdir -p /home/www-data
+sudo chown www-data:www-data /home/www-data
+
 # Enable and start the service
 sudo systemctl daemon-reload
 sudo systemctl enable ncwforms
@@ -278,6 +304,38 @@ sudo systemctl restart binbuddies
 - **NCWForms**: `https://yourdomain.com/ncwforms/recon`
 
 ## 🚨 Quick Troubleshooting
+
+### .NET Version Mismatch:
+If you see `You must install or update .NET to run this application`:
+```bash
+# Check available .NET versions
+dotnet --list-runtimes
+
+# Option 1: Update project to match available runtime
+cd /var/www/ncwforms
+sed -i 's/<TargetFramework>net7.0<\/TargetFramework>/<TargetFramework>net8.0<\/TargetFramework>/g' *.csproj
+dotnet clean && dotnet restore && dotnet build --configuration Release
+
+# Update service file to match new target framework
+sudo sed -i 's/net7.0/net8.0/g' /etc/systemd/system/ncwforms.service
+sudo systemctl daemon-reload && sudo systemctl restart ncwforms
+
+# Option 2: Install matching .NET runtime
+# sudo apt-get install -y aspnetcore-runtime-7.0
+```
+
+### .NET Permission Issues:
+If you see `Access to the path '/var/www/.dotnet' is denied`:
+```bash
+# Fix .NET directories and permissions
+sudo mkdir -p /var/www/.dotnet /home/www-data
+sudo chown -R www-data:www-data /var/www/.dotnet /home/www-data
+sudo chmod -R 755 /var/www/.dotnet
+
+# Restart the service
+sudo systemctl daemon-reload
+sudo systemctl restart ncwforms
+```
 
 ### Port Conflicts:
 ```bash

@@ -27,7 +27,7 @@ sudo apt update && sudo apt upgrade -y
 sudo apt install -y curl wget git unzip software-properties-common apt-transport-https
 ```
 
-## 🔷 Step 2: Install .NET 7 SDK
+## 🔷 Step 2: Install .NET 8 SDK
 
 ### Add Microsoft Package Repository
 ```bash
@@ -41,14 +41,14 @@ sudo dpkg -i packages-microsoft-prod.deb
 sudo apt update
 ```
 
-### Install .NET 7 SDK
+### Install .NET 8 SDK
 ```bash
-# Install .NET 7 SDK
-sudo apt install -y dotnet-sdk-7.0
+# Install .NET 8 SDK
+sudo apt install -y dotnet-sdk-8.0
 
 # Verify installation
 dotnet --version
-# Should output: 7.0.x
+# Should output: 8.0.x
 ```
 
 ### Verify .NET Installation
@@ -207,7 +207,7 @@ After=network.target
 
 [Service]
 Type=notify
-ExecStart=/usr/bin/dotnet /var/www/jobcompare/bin/Release/net7.0/JobCompare.dll
+ExecStart=/usr/bin/dotnet /var/www/jobcompare/bin/Release/net8.0/JobCompare.dll
 Restart=always
 RestartSec=5
 TimeoutStopSec=90
