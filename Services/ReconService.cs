@@ -42,7 +42,7 @@ namespace JobCompareApp.Services
                 .Select(g => new PivotResult
                 {
                     Key = $"{g.Key.Name} - {g.Key.Item}",
-                    Amount = g.Sum(x => x.SalesPrice),
+                    Amount = g.Sum(x => x.Amount),
                     Quantity = g.Count(),
                     Count = g.Count()
                 })
@@ -58,7 +58,7 @@ namespace JobCompareApp.Services
                 .Select(g => new PivotResult
                 {
                     Key = $"{g.Key.Rep} - {g.Key.Name}",
-                    Amount = g.Sum(x => x.SalesPrice),
+                    Amount = g.Sum(x => x.Amount),
                     Quantity = g.Count(),
                     Count = g.Count()
                 })
@@ -73,7 +73,7 @@ namespace JobCompareApp.Services
                 .Select(g => new PivotResult
                 {
                     Key = g.Key,
-                    Amount = g.Sum(x => x.SalesPrice),
+                    Amount = g.Sum(x => x.Amount),
                     Quantity = g.Count(),
                     Count = g.GroupBy(x => x.Type).Count() // Approximate invoice count
                 })
@@ -89,7 +89,7 @@ namespace JobCompareApp.Services
                 .Select(g => new PivotResult
                 {
                     Key = $"{g.Key.Employee} - {g.Key.JobSite}",
-                    Amount = g.Sum(x => x.SalesPrice),
+                    Amount = g.Sum(x => x.Amount),
                     Quantity = g.Count(),
                     Count = g.Count()
                 })
@@ -120,7 +120,7 @@ namespace JobCompareApp.Services
                 .Select(clientGroup => new HierarchicalPivotGroup
                 {
                     GroupName = clientGroup.Key,
-                    TotalAmount = clientGroup.Sum(x => x.SalesPrice),
+                    TotalAmount = clientGroup.Sum(x => x.Amount),
                     TotalCount = clientGroup.Count(),
                     IsExpanded = false, // Start collapsed
                     Children = clientGroup
@@ -128,7 +128,7 @@ namespace JobCompareApp.Services
                         .Select(itemGroup => new PivotResult
                         {
                             Key = itemGroup.Key,
-                            Amount = itemGroup.Sum(x => x.SalesPrice),
+                            Amount = itemGroup.Sum(x => x.Amount),
                             Quantity = itemGroup.Count(),
                             Count = itemGroup.Count()
                         })
@@ -147,7 +147,7 @@ namespace JobCompareApp.Services
                 .Select(repGroup => new HierarchicalPivotGroup
                 {
                     GroupName = repGroup.Key,
-                    TotalAmount = repGroup.Sum(x => x.SalesPrice),
+                    TotalAmount = repGroup.Sum(x => x.Amount),
                     TotalCount = repGroup.Count(),
                     IsExpanded = false,
                     Children = repGroup
@@ -155,7 +155,7 @@ namespace JobCompareApp.Services
                         .Select(clientGroup => new PivotResult
                         {
                             Key = clientGroup.Key,
-                            Amount = clientGroup.Sum(x => x.SalesPrice),
+                            Amount = clientGroup.Sum(x => x.Amount),
                             Quantity = clientGroup.Count(),
                             Count = clientGroup.Count()
                         })
@@ -203,7 +203,7 @@ namespace JobCompareApp.Services
             return allClients.Select(client => new ClientSummary
             {
                 ClientName = client, // This maps to "Quickbooks" column
-                QBBalance = qbByClient.ContainsKey(client) ? qbByClient[client].Sum(x => x.SalesPrice) : 0,
+                QBBalance = qbByClient.ContainsKey(client) ? qbByClient[client].Sum(x => x.Amount) : 0,
                 AviClientName = client, // "Avi" column (same as QB for now)
                 AviBalance = avionteByClient.ContainsKey(client) ? avionteByClient[client].Sum(x => x.ItemBill) : 0,
                 PaymentType = depositByClient.ContainsKey(client) && depositByClient[client] != null ? depositByClient[client]!.PaymentMethod : "Research pymt method",
@@ -231,7 +231,7 @@ namespace JobCompareApp.Services
 
             foreach (var client in qbByClient.Keys.Union(avionteByClient.Keys).Distinct())
             {
-                var qbAmount = qbByClient.ContainsKey(client) ? qbByClient[client].Sum(x => x.SalesPrice) : 0;
+                var qbAmount = qbByClient.ContainsKey(client) ? qbByClient[client].Sum(x => x.Amount) : 0;
                 var avionteAmount = avionteByClient.ContainsKey(client) ? avionteByClient[client].Sum(x => x.ItemBill) : 0;
                 var variance = qbAmount - avionteAmount;
 
@@ -253,7 +253,7 @@ namespace JobCompareApp.Services
             // Add detailed employee-level variances
             foreach (var client in qbByClient.Keys.Intersect(avionteByClient.Keys))
             {
-                var qbEmployees = qbByClient[client].GroupBy(x => x.Item).ToDictionary(g => g.Key, g => g.Sum(x => x.SalesPrice));
+                var qbEmployees = qbByClient[client].GroupBy(x => x.Item).ToDictionary(g => g.Key, g => g.Sum(x => x.Amount));
                 var avionteEmployees = avionteByClient[client].GroupBy(x => x.Name).ToDictionary(g => g.Key, g => g.Sum(x => x.ItemBill));
 
                 foreach (var employee in qbEmployees.Keys.Union(avionteEmployees.Keys).Distinct())

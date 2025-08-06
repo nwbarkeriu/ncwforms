@@ -56,7 +56,7 @@ namespace JobCompareApp.Services
                         Name = CleanName(originalName), // Clean client name without jobsite
                         Memo = ExtractJobSite(originalName), // Jobsite information only
                         Item = columnMap.ContainsKey("Item") ? row.Cell(columnMap["Item"]).GetString().Trim() : "",
-                        SalesPrice = columnMap.ContainsKey("Sales Price") ? row.Cell(columnMap["Sales Price"]).GetValue<decimal>() : 0,
+                        Amount = columnMap.ContainsKey("Amount") ? row.Cell(columnMap["Amount"]).GetValue<decimal>() : 0,
                         Type = row.Cell(columnMap["Type"]).GetString().Trim(),
                         Account = columnMap.ContainsKey("Account") ? row.Cell(columnMap["Account"]).GetString().Trim() : "",
                         Rep = columnMap.ContainsKey("Rep") ? row.Cell(columnMap["Rep"]).GetString().Trim() : "",
@@ -74,7 +74,7 @@ namespace JobCompareApp.Services
 
             // Sort by Sales Price → Item → Name as per requirements
             return entries
-                .OrderBy(e => e.SalesPrice)
+                .OrderBy(e => e.Amount)
                 .ThenBy(e => e.Item)
                 .ThenBy(e => e.Name)
                 .ToList();
