@@ -1,4 +1,5 @@
 using JobCompareApp.Models;
+using JobCompareApp.Services;
 using System.Text.RegularExpressions;
 
 namespace JobCompareApp.Services
@@ -169,7 +170,7 @@ namespace JobCompareApp.Services
         private static List<HierarchicalPivotGroup> GenerateAvionteBillToNameHierarchical(List<AvionteEntry> entries)
         {
             return entries
-                .GroupBy(e => e.BillToName) // Group by client name first
+                .GroupBy(e => e.BillToName) // Group by raw Avionte client name (as it should be)
                 .Select(clientGroup => new HierarchicalPivotGroup
                 {
                     GroupName = clientGroup.Key,
@@ -198,87 +199,298 @@ namespace JobCompareApp.Services
             var avionteByClient = avionteEntries.GroupBy(e => e.BillToName).ToDictionary(g => g.Key, g => g.ToList());
             var depositByClient = depositDetails?.GroupBy(e => e.ClientName).ToDictionary(g => g.Key, g => g.FirstOrDefault()) ?? new Dictionary<string, DepositDetailEntry?>();
 
-            var allClients = qbByClient.Keys.Union(avionteByClient.Keys).Distinct();
+            // Calculate amounts by client for the matching algorithm
+            var qbAmountsByClient = qbByClient.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Sum(x => x.Amount));
+            var avionteAmountsByClient = avionteByClient.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Sum(x => x.ItemBill));
 
-            return allClients.Select(client => new ClientSummary
+            // Use the new client matching system with amount-based matching
+            var qbClientNames = qbByClient.Keys;
+            var avionteClientNames = avionteByClient.Keys;
+            var clientMatches = ClientMatcher.CreateUnifiedMatches(qbClientNames, avionteClientNames, qbAmountsByClient, avionteAmountsByClient);
+
+            return clientMatches.Values.Select(match => new ClientSummary
             {
-                ClientName = client, // This maps to "Quickbooks" column
-                QBBalance = qbByClient.ContainsKey(client) ? qbByClient[client].Sum(x => x.Amount) : 0,
-                AviClientName = client, // "Avi" column (same as QB for now)
-                AviBalance = avionteByClient.ContainsKey(client) ? avionteByClient[client].Sum(x => x.ItemBill) : 0,
-                PaymentType = depositByClient.ContainsKey(client) && depositByClient[client] != null ? depositByClient[client]!.PaymentMethod : "Research pymt method",
+                ClientName = match.QBName ?? match.UnifiedName, // This maps to "Quickbooks" column
+                QBBalance = match.HasQBData && qbByClient.ContainsKey(match.QBName!) ? qbByClient[match.QBName!].Sum(x => x.Amount) : 0,
+                AviClientName = match.AvionteName ?? "", // "Avi" column (show actual Avionte name)
+                AviBalance = match.HasAvionteData && avionteByClient.ContainsKey(match.AvionteName!) ? avionteByClient[match.AvionteName!].Sum(x => x.ItemBill) : 0,
+                PaymentType = GetPaymentTypeForMatch(match, depositByClient),
                 Team = "", // Not available in current Avionte data structure
                 PRRep = "", // Not available in current Avionte data structure
                 SendType = "", // Not available in current data
                 AccountType = "", // Not available in current data
                 BillingNotes = "", // User input field
-                Notes = "",
+                Notes = GetMatchNotes(match),
                 Status = "",
-                QBInvoiceCount = qbByClient.ContainsKey(client) ? qbByClient[client].GroupBy(x => x.Type).Count() : 0,
-                AvionteRecordCount = avionteByClient.ContainsKey(client) ? avionteByClient[client].Count : 0,
-                Employees = avionteByClient.ContainsKey(client) ? avionteByClient[client].Select(x => x.Name).Distinct().ToList() : new List<string>(),
-                JobSites = qbByClient.ContainsKey(client) ? qbByClient[client].Where(x => !string.IsNullOrEmpty(x.Memo)).Select(x => x.Memo).Distinct().ToList() : new List<string>()
+                QBInvoiceCount = match.HasQBData && qbByClient.ContainsKey(match.QBName!) ? qbByClient[match.QBName!].GroupBy(x => x.Type).Count() : 0,
+                AvionteRecordCount = match.HasAvionteData && avionteByClient.ContainsKey(match.AvionteName!) ? avionteByClient[match.AvionteName!].Count : 0,
+                Employees = match.HasAvionteData && avionteByClient.ContainsKey(match.AvionteName!) ? avionteByClient[match.AvionteName!].Select(x => x.Name).Distinct().ToList() : new List<string>(),
+                JobSites = match.HasQBData && qbByClient.ContainsKey(match.QBName!) ? qbByClient[match.QBName!].Where(x => !string.IsNullOrEmpty(x.Memo)).Select(x => x.Memo).Distinct().ToList() : new List<string>()
             }).OrderBy(s => s.ClientName).ToList();
+        }
+
+        private static string GetPaymentTypeForMatch(ClientMatch match, Dictionary<string, DepositDetailEntry?> depositByClient)
+        {
+            // Try to find payment type by QB name first, then Avionte name
+            if (match.HasQBData && depositByClient.ContainsKey(match.QBName!) && depositByClient[match.QBName!] != null)
+                return depositByClient[match.QBName!]!.PaymentMethod;
+            
+            if (match.HasAvionteData && depositByClient.ContainsKey(match.AvionteName!) && depositByClient[match.AvionteName!] != null)
+                return depositByClient[match.AvionteName!]!.PaymentMethod;
+
+            return "Research pymt method";
+        }
+
+        private static string GetMatchNotes(ClientMatch match)
+        {
+            return match.MatchType switch
+            {
+                MatchType.ExceptionRule => "Matched via exception rule",
+                MatchType.AmountZeroOut => "Matched via amounts that zero out + similar names (likely same client)",
+                MatchType.Normalized => "Matched after name normalization",
+                MatchType.FirstWords => "Matched on first words",
+                MatchType.Fuzzy => "Fuzzy match (contains)",
+                MatchType.QBOnly => "QB only - no Avionte match",
+                MatchType.AvionteOnly => "Avionte only - no QB match",
+                _ => ""
+            };
         }
 
         private static List<VarianceEntry> GenerateVarianceAnalysis(List<QuickBooksEntry> qbEntries, List<AvionteEntry> avionteEntries)
         {
             var variances = new List<VarianceEntry>();
 
-            // Group by client and compare totals
             var qbByClient = qbEntries.GroupBy(e => e.Name).ToDictionary(g => g.Key, g => g.ToList());
             var avionteByClient = avionteEntries.GroupBy(e => e.BillToName).ToDictionary(g => g.Key, g => g.ToList());
 
-            foreach (var client in qbByClient.Keys.Union(avionteByClient.Keys).Distinct())
-            {
-                var qbAmount = qbByClient.ContainsKey(client) ? qbByClient[client].Sum(x => x.Amount) : 0;
-                var avionteAmount = avionteByClient.ContainsKey(client) ? avionteByClient[client].Sum(x => x.ItemBill) : 0;
-                var variance = qbAmount - avionteAmount;
+            // Calculate amounts by client for the matching algorithm
+            var qbAmountsByClient = qbByClient.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Sum(x => x.Amount));
+            var avionteAmountsByClient = avionteByClient.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Sum(x => x.ItemBill));
 
-                if (Math.Abs(variance) > 0.01m) // Only include significant variances
+            // STEP 1: Use client matching system to identify matched clients
+            var qbClientNames = qbByClient.Keys;
+            var avionteClientNames = avionteByClient.Keys;
+            var clientMatches = ClientMatcher.CreateUnifiedMatches(qbClientNames, avionteClientNames, qbAmountsByClient, avionteAmountsByClient);
+
+            // STEP 2: For each matched client, perform detailed employee-level analysis
+            foreach (var clientMatch in clientMatches.Values.Where(m => m.IsPerfectMatch))
+            {
+                var qbEntries_client = qbByClient[clientMatch.QBName!];
+                var avionteEntries_client = avionteByClient[clientMatch.AvionteName!];
+
+                // Calculate employee amounts for this client
+                var qbAmountsByEmployee = qbEntries_client.GroupBy(x => x.Item).ToDictionary(g => g.Key, g => g.Sum(x => x.Amount));
+                var avionteAmountsByEmployee = avionteEntries_client.GroupBy(x => x.Name).ToDictionary(g => g.Key, g => g.Sum(x => x.ItemBill));
+
+                // STEP 3: Match employees within this client using enhanced employee matching with context
+                var qbEmployeeNames = qbAmountsByEmployee.Keys;
+                var avionteEmployeeNames = avionteAmountsByEmployee.Keys;
+                
+                // Use enhanced matching that considers client context and amounts
+                var employeeMatches = new Dictionary<string, EmployeeMatch>(StringComparer.OrdinalIgnoreCase);
+                var processedAvionte = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                // Process QB employees first with enhanced context-aware matching
+                foreach (var qbEmpName in qbEmployeeNames)
                 {
-                    variances.Add(new VarianceEntry
+                    var qbAmount = qbAmountsByEmployee[qbEmpName];
+                    
+                    // Try enhanced matching with context
+                    var avionteMatch = EmployeeMatcher.FindBestEmployeeMatchWithContext(
+                        qbEmpName, 
+                        avionteEmployeeNames.Where(a => !processedAvionte.Contains(a)), 
+                        clientMatch.UnifiedName,
+                        qbAmount,
+                        avionteAmountsByEmployee);
+                    
+                    var unifiedName = qbEmpName; // Use QB name as unified
+
+                    if (avionteMatch != null)
                     {
-                        ClientName = client,
-                        EmployeeName = "Total",
-                        JobSite = "All",
-                        QBAmount = qbAmount,
-                        AvionteAmount = avionteAmount,
-                        VarianceType = "Total",
-                        Notes = $"Client total variance: {variance:C}"
-                    });
+                        var avionteAmount = avionteAmountsByEmployee[avionteMatch];
+                        employeeMatches[unifiedName] = new EmployeeMatch
+                        {
+                            UnifiedName = unifiedName,
+                            QBName = qbEmpName,
+                            AvionteName = avionteMatch,
+                            QBAmount = qbAmount,
+                            AvionteAmount = avionteAmount,
+                            MatchType = GetEnhancedEmployeeMatchType(qbEmpName, avionteMatch, qbAmount, avionteAmount)
+                        };
+                        processedAvionte.Add(avionteMatch);
+                    }
+                    else
+                    {
+                        employeeMatches[unifiedName] = new EmployeeMatch
+                        {
+                            UnifiedName = unifiedName,
+                            QBName = qbEmpName,
+                            AvionteName = null,
+                            QBAmount = qbAmount,
+                            AvionteAmount = 0,
+                            MatchType = EmployeeMatchType.QBOnly
+                        };
+                    }
                 }
-            }
 
-            // Add detailed employee-level variances
-            foreach (var client in qbByClient.Keys.Intersect(avionteByClient.Keys))
-            {
-                var qbEmployees = qbByClient[client].GroupBy(x => x.Item).ToDictionary(g => g.Key, g => g.Sum(x => x.Amount));
-                var avionteEmployees = avionteByClient[client].GroupBy(x => x.Name).ToDictionary(g => g.Key, g => g.Sum(x => x.ItemBill));
-
-                foreach (var employee in qbEmployees.Keys.Union(avionteEmployees.Keys).Distinct())
+                // Process remaining unmatched Avionte employees
+                foreach (var avionteEmpName in avionteEmployeeNames.Where(a => !processedAvionte.Contains(a)))
                 {
-                    var qbEmpAmount = qbEmployees.ContainsKey(employee) ? qbEmployees[employee] : 0;
-                    var avionteEmpAmount = avionteEmployees.ContainsKey(employee) ? avionteEmployees[employee] : 0;
-                    var empVariance = qbEmpAmount - avionteEmpAmount;
+                    var avionteAmount = avionteAmountsByEmployee[avionteEmpName];
+                    employeeMatches[avionteEmpName] = new EmployeeMatch
+                    {
+                        UnifiedName = avionteEmpName,
+                        QBName = null,
+                        AvionteName = avionteEmpName,
+                        QBAmount = 0,
+                        AvionteAmount = avionteAmount,
+                        MatchType = EmployeeMatchType.AvionteOnly
+                    };
+                }
 
-                    if (Math.Abs(empVariance) > 0.01m)
+                // STEP 4: Generate variances only for TRUE mismatches
+                foreach (var empMatch in employeeMatches.Values)
+                {
+                    // Only create variance entries for significant differences
+                    if (empMatch.HasSignificantVariance)
+                    {
+                        // Determine variance type based on matching status
+                        string varianceType;
+                        string notes;
+
+                        if (empMatch.MatchType == EmployeeMatchType.QBOnly)
+                        {
+                            varianceType = "QB Only Employee";
+                            notes = $"Employee exists only in QuickBooks for client {clientMatch.UnifiedName}";
+                        }
+                        else if (empMatch.MatchType == EmployeeMatchType.AvionteOnly)
+                        {
+                            varianceType = "Avionte Only Employee";
+                            notes = $"Employee exists only in Avionte for client {clientMatch.UnifiedName}";
+                        }
+                        else if (empMatch.AmountsZeroOut)
+                        {
+                            // Skip this - amounts zero out, so no real variance
+                            continue;
+                        }
+                        else
+                        {
+                            varianceType = "Employee Amount Variance";
+                            notes = $"Employee amounts differ: QB ${empMatch.QBAmount:N2} vs Avionte ${empMatch.AvionteAmount:N2} (Match: {empMatch.MatchType})";
+                        }
+
+                        variances.Add(new VarianceEntry
+                        {
+                            ClientName = clientMatch.UnifiedName,
+                            EmployeeName = empMatch.UnifiedName,
+                            JobSite = "Multiple",
+                            QBAmount = empMatch.QBAmount,
+                            AvionteAmount = empMatch.AvionteAmount,
+                            VarianceType = varianceType,
+                            Notes = notes
+                        });
+                    }
+                }
+
+                // STEP 5: Check for client-level variance (after accounting for employee matches)
+                var clientQBTotal = qbAmountsByEmployee.Values.Sum();
+                var clientAvionteTotal = avionteAmountsByEmployee.Values.Sum();
+                var clientVariance = clientQBTotal - clientAvionteTotal;
+
+                // Only add client-level variance if there's a significant difference
+                // and it's not just due to unmatched employees (which we already counted above)
+                if (Math.Abs(clientVariance) > 0.01m)
+                {
+                    var matchedEmployeeVariance = employeeMatches.Values
+                        .Where(em => em.IsPerfectMatch && !em.AmountsZeroOut)
+                        .Sum(em => em.Variance);
+
+                    var unmatchedVariance = employeeMatches.Values
+                        .Where(em => !em.IsPerfectMatch)
+                        .Sum(em => em.Variance);
+
+                    // If the total client variance is significantly different from the sum of employee variances,
+                    // there might be a client-level issue
+                    var accountedVariance = matchedEmployeeVariance + unmatchedVariance;
+                    var unexplainedVariance = clientVariance - accountedVariance;
+
+                    if (Math.Abs(unexplainedVariance) > 0.01m)
                     {
                         variances.Add(new VarianceEntry
                         {
-                            ClientName = client,
-                            EmployeeName = employee,
-                            JobSite = "Multiple",
-                            QBAmount = qbEmpAmount,
-                            AvionteAmount = avionteEmpAmount,
-                            VarianceType = "Employee",
-                            Notes = $"Employee variance: {empVariance:C}"
+                            ClientName = clientMatch.UnifiedName,
+                            EmployeeName = "Client Total",
+                            JobSite = "All",
+                            QBAmount = clientQBTotal,
+                            AvionteAmount = clientAvionteTotal,
+                            VarianceType = "Client Level Variance",
+                            Notes = $"Client total variance: {clientVariance:C} (Match: {clientMatch.MatchType}) - Unexplained: {unexplainedVariance:C}"
                         });
                     }
                 }
             }
 
+            // STEP 6: Add variances for completely unmatched clients
+            foreach (var clientMatch in clientMatches.Values.Where(m => !m.IsPerfectMatch))
+            {
+                if (clientMatch.MatchType == MatchType.QBOnly)
+                {
+                    var qbAmount = qbByClient[clientMatch.QBName!].Sum(x => x.Amount);
+                    variances.Add(new VarianceEntry
+                    {
+                        ClientName = clientMatch.QBName!,
+                        EmployeeName = "Total",
+                        JobSite = "All",
+                        QBAmount = qbAmount,
+                        AvionteAmount = 0,
+                        VarianceType = "QB Only Client",
+                        Notes = "Client exists only in QuickBooks"
+                    });
+                }
+                else if (clientMatch.MatchType == MatchType.AvionteOnly)
+                {
+                    var avionteAmount = avionteByClient[clientMatch.AvionteName!].Sum(x => x.ItemBill);
+                    variances.Add(new VarianceEntry
+                    {
+                        ClientName = clientMatch.AvionteName!,
+                        EmployeeName = "Total",
+                        JobSite = "All",
+                        QBAmount = 0,
+                        AvionteAmount = avionteAmount,
+                        VarianceType = "Avionte Only Client",
+                        Notes = "Client exists only in Avionte"
+                    });
+                }
+            }
+
             return variances.OrderBy(v => v.ClientName).ThenBy(v => v.EmployeeName).ToList();
+        }
+
+        /// <summary>
+        /// Enhanced employee match type detection with context awareness
+        /// </summary>
+        private static EmployeeMatchType GetEnhancedEmployeeMatchType(string qbName, string avionteName, decimal qbAmount, decimal avionteAmount)
+        {
+            if (string.Equals(qbName, avionteName, StringComparison.OrdinalIgnoreCase))
+                return EmployeeMatchType.Exact;
+
+            var normalizedQB = EmployeeMatcher.NormalizeEmployeeName(qbName);
+            var normalizedAvionte = EmployeeMatcher.NormalizeEmployeeName(avionteName);
+
+            if (string.Equals(normalizedQB, normalizedAvionte, StringComparison.OrdinalIgnoreCase))
+                return EmployeeMatchType.Normalized;
+
+            // Check if amounts zero out (indicating likely same person)
+            var amountsZeroOut = Math.Abs(Math.Abs(qbAmount) - Math.Abs(avionteAmount)) < 0.01m && 
+                               Math.Abs(qbAmount + avionteAmount) < 0.01m;
+
+            if (amountsZeroOut)
+            {
+                // If amounts zero out, it's likely the same person even with name differences
+                return EmployeeMatchType.Fuzzy; // Could add a new type like "AmountBasedMatch"
+            }
+
+            return EmployeeMatchType.Fuzzy;
         }
 
         public static List<DepositDetailEntry> ProcessDepositDetail(byte[] fileBytes)
@@ -292,6 +504,9 @@ namespace JobCompareApp.Services
                 var worksheet = workbook.Worksheet(1);
 
                 var headerRow = worksheet.FirstRowUsed();
+                if (headerRow == null)
+                    throw new InvalidOperationException("No data found in the worksheet");
+                    
                 var columnMap = new Dictionary<string, int>();
                 foreach (var cell in headerRow.CellsUsed())
                 {

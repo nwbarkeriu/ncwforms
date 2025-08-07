@@ -63,6 +63,7 @@
                         <div class="col-md-3">
                             <div class="text-center">
                                 <h4 class="text-info">@ReconResults.ClientSummaries.Count</h4>
+                                <small>Clients</small>
                             </div>
                         </div>
                         <div class="col-md-3">
@@ -225,8 +226,8 @@
                                             <i class="fas fa-sort ms-1 text-muted"></i>
                                         }
                                     </th>
-                                    <th>Billing Notes (USER INPUT MEMO FIELD)</th>
-                                    <th>Notes</th>
+                                    <th>Billing Notes</th>
+                                    <th>Matching Notes</th>
                                     <th style="cursor: pointer;" @onclick="() => SortSummary(nameof(ClientSummary.Status))">
                                         Status
                                         @if (SummarySortColumn == nameof(ClientSummary.Status))
@@ -520,7 +521,7 @@
                                                 </td>
                                                 <td><strong>@FormatCurrency(group.TotalAmount)</strong></td>
                                                 <td><strong>@group.TotalCount</strong></td>
-                                                <td><small class="text-muted">@group.Children.Count clients</small></td>
+                                                <td><small class="text-muted">@group.Children.Count </small></td>
                                             </tr>
                                             
                                             <!-- Child Client Rows (shown when expanded) -->
@@ -746,8 +747,8 @@
     private SummaryFilterModel SummaryFilters = new();
 
     // Variance sorting and filtering  
-    private string VarianceSortColumn = nameof(VarianceEntry.Variance);
-    private bool VarianceSortAscending = false; // Default to largest variance first
+    private string VarianceSortColumn = nameof(VarianceEntry.ClientName);
+    private bool VarianceSortAscending = true; // Default to alphabetical by client name first
     private VarianceFilterModel VarianceFilters = new();
 
     private bool CanProcessRecon => QBEntries.Any() && AvionteEntries.Any();
@@ -971,14 +972,14 @@
 
         return VarianceSortColumn switch
         {
-            nameof(VarianceEntry.ClientName) => VarianceSortAscending ? filtered.OrderBy(v => v.ClientName) : filtered.OrderByDescending(v => v.ClientName),
+            nameof(VarianceEntry.ClientName) => VarianceSortAscending ? filtered.OrderBy(v => v.ClientName).ThenBy(v => v.EmployeeName) : filtered.OrderByDescending(v => v.ClientName).ThenByDescending(v => v.EmployeeName),
             nameof(VarianceEntry.EmployeeName) => VarianceSortAscending ? filtered.OrderBy(v => v.EmployeeName) : filtered.OrderByDescending(v => v.EmployeeName),
             nameof(VarianceEntry.JobSite) => VarianceSortAscending ? filtered.OrderBy(v => v.JobSite) : filtered.OrderByDescending(v => v.JobSite),
             nameof(VarianceEntry.QBAmount) => VarianceSortAscending ? filtered.OrderBy(v => v.QBAmount) : filtered.OrderByDescending(v => v.QBAmount),
             nameof(VarianceEntry.AvionteAmount) => VarianceSortAscending ? filtered.OrderBy(v => v.AvionteAmount) : filtered.OrderByDescending(v => v.AvionteAmount),
             nameof(VarianceEntry.Variance) => VarianceSortAscending ? filtered.OrderBy(v => Math.Abs(v.Variance)) : filtered.OrderByDescending(v => Math.Abs(v.Variance)),
             nameof(VarianceEntry.VarianceType) => VarianceSortAscending ? filtered.OrderBy(v => v.VarianceType) : filtered.OrderByDescending(v => v.VarianceType),
-            _ => filtered.OrderByDescending(v => Math.Abs(v.Variance)) // Default sort by largest variance
+            _ => filtered.OrderBy(v => v.ClientName).ThenBy(v => v.EmployeeName) // Default sort by client name, then employee name
         };
     }
 

@@ -20,6 +20,9 @@ namespace JobCompareApp.Services
 
             // Find headers
             var headerRow = worksheet.FirstRowUsed();
+            if (headerRow == null)
+                throw new InvalidOperationException("No data found in the worksheet");
+                
             var columnMap = new Dictionary<string, int>();
             foreach (var cell in headerRow.CellsUsed())
             {
@@ -89,6 +92,9 @@ namespace JobCompareApp.Services
             var entries = new List<AvionteEntry>();
 
             var headerRow = worksheet.FirstRowUsed();
+            if (headerRow == null)
+                throw new InvalidOperationException("No data found in the worksheet");
+                
             var columnMap = new Dictionary<string, int>();
             foreach (var cell in headerRow.CellsUsed())
             {
