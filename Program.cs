@@ -27,7 +27,7 @@ app.Use(async (context, next) =>
     var ip = context.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
     var path = context.Request.Path.Value ?? "/";
     
-    // Only log actual page visits (not static files, SignalR, etc.)
+    // Only log actual page visits (not static files, SignalR, security probes, etc.)
     if (!path.StartsWith("/_blazor") &&
         !path.StartsWith("/_framework") &&
         !path.StartsWith("/css") &&
@@ -37,7 +37,8 @@ app.Use(async (context, next) =>
         !path.Contains(".js") &&
         !path.Contains(".png") &&
         !path.Contains(".ico") &&
-        !path.Contains("favicon"))
+        !path.Contains("favicon") &&
+        !IsSecurityProbe(path))
     {
         var logMessage = $"VISIT: {DateTime.Now:yyyy-MM-dd HH:mm:ss} | IP: {ip} | Path: {path} | Browser: {ExtractBrowser(userAgent)}";
         
@@ -48,6 +49,17 @@ app.Use(async (context, next) =>
         if (!app.Environment.IsDevelopment())
         {
             await WriteToLogFileAsync(logMessage);
+        }
+    }
+    else if (IsSecurityProbe(path))
+    {
+        // Log security probes separately
+        var probeMessage = $"PROBE: {DateTime.Now:yyyy-MM-dd HH:mm:ss} | IP: {ip} | Path: {path} | Browser: {ExtractBrowser(userAgent)}";
+        logger.LogWarning(probeMessage);
+        
+        if (!app.Environment.IsDevelopment())
+        {
+            await WriteToSecurityLogAsync(probeMessage);
         }
     }
     
@@ -65,6 +77,19 @@ static string ExtractBrowser(string userAgent)
     return "Other";
 }
 
+// Helper method to detect security probes
+static bool IsSecurityProbe(string path)
+{
+    var probePaths = new[]
+    {
+        ".php", ".env", ".yml", ".properties", ".xml", ".config",
+        "phpinfo", "api/", "admin/", "wp-", "test.", "backup",
+        ".git", ".svn", "config.", "application."
+    };
+    
+    return probePaths.Any(probe => path.Contains(probe, StringComparison.OrdinalIgnoreCase));
+}
+
 // Helper method to write to log file
 static async Task WriteToLogFileAsync(string message)
 {
@@ -73,6 +98,22 @@ static async Task WriteToLogFileAsync(string message)
         var logsDir = "/var/www/ncwforms/logs";
         Directory.CreateDirectory(logsDir);
         var logFile = Path.Combine(logsDir, $"visits-{DateTime.Now:yyyy-MM-dd}.log");
+        await File.AppendAllTextAsync(logFile, message + Environment.NewLine);
+    }
+    catch
+    {
+        // Silently continue if file logging fails
+    }
+}
+
+// Helper method to write to security log file
+static async Task WriteToSecurityLogAsync(string message)
+{
+    try
+    {
+        var logsDir = "/var/www/ncwforms/logs";
+        Directory.CreateDirectory(logsDir);
+        var logFile = Path.Combine(logsDir, $"security-{DateTime.Now:yyyy-MM-dd}.log");
         await File.AppendAllTextAsync(logFile, message + Environment.NewLine);
     }
     catch
