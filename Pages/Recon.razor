@@ -29,8 +29,26 @@
         <button class="btn btn-secondary ms-2" @onclick="ClearData">
             🗑️ Clear All Data
         </button>
+        @if (QBEntries.Any() && AvionteEntries.Any())
+        {
+            <button class="btn btn-warning ms-2" @onclick="DebugAlfonso">
+                🔍 Debug Alfonso/Alfonzo
+            </button>
+        }
     </div>
 </div>
+
+@if (!string.IsNullOrEmpty(DebugOutput))
+{
+    <div class="card mt-3">
+        <div class="card-header bg-warning">
+            <h6 class="mb-0">🔍 Debug Output</h6>
+        </div>
+        <div class="card-body">
+            <pre style="font-size: 12px; white-space: pre-wrap;">@DebugOutput</pre>
+        </div>
+    </div>
+}
 
 @if (!string.IsNullOrEmpty(StatusMessage))
 {
@@ -740,6 +758,7 @@
     private List<AvionteEntry> AvionteEntries = new();
     private List<DepositDetailEntry> DepositDetails = new();
     private ReconResults? ReconResults;
+    private string DebugOutput = "";
 
     // Summary sorting and filtering
     private string SummarySortColumn = "";
@@ -752,6 +771,22 @@
     private VarianceFilterModel VarianceFilters = new();
 
     private bool CanProcessRecon => QBEntries.Any() && AvionteEntries.Any();
+
+    private void DebugAlfonso()
+    {
+        try
+        {
+            DebugOutput = ReconService.DebugEmployeeMatching(QBEntries, AvionteEntries, "Alfonso");
+            StatusMessage = "🔍 Debug analysis completed - see results below.";
+            IsError = false;
+        }
+        catch (Exception ex)
+        {
+            DebugOutput = $"Error during debug: {ex.Message}";
+            StatusMessage = "❌ Debug analysis failed.";
+            IsError = true;
+        }
+    }
 
     private async Task HandleQBFile(InputFileChangeEventArgs e)
     {

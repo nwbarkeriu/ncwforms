@@ -6,6 +6,105 @@ namespace JobCompareApp.Services
 {
     public static class ReconService
     {
+        /// <summary>
+        /// Debug method to trace how specific employees are being processed
+        /// </summary>
+        public static string DebugEmployeeMatching(List<QuickBooksEntry> qbEntries, List<AvionteEntry> avionteEntries, string searchEmployee)
+        {
+            var debug = new System.Text.StringBuilder();
+            debug.AppendLine($"=== DEBUGGING EMPLOYEE MATCHING FOR: {searchEmployee} ===");
+            
+            // Step 1: Check if employee exists in raw data
+            var qbMatches = qbEntries.Where(e => e.Item.Contains(searchEmployee, StringComparison.OrdinalIgnoreCase)).ToList();
+            var avionteMatches = avionteEntries.Where(e => e.Name.Contains(searchEmployee, StringComparison.OrdinalIgnoreCase)).ToList();
+            
+            debug.AppendLine($"\n1. RAW DATA SEARCH:");
+            debug.AppendLine($"   QB matches ({qbMatches.Count}):");
+            foreach (var qb in qbMatches)
+                debug.AppendLine($"     Client: '{qb.Name}' | Employee: '{qb.Item}' | Amount: {qb.Amount:C}");
+            
+            debug.AppendLine($"   Avionte matches ({avionteMatches.Count}):");
+            foreach (var av in avionteMatches)
+                debug.AppendLine($"     Client: '{av.BillToName}' | Employee: '{av.Name}' | Amount: {av.ItemBill:C}");
+            
+            // Step 2: Check client grouping
+            var qbByClient = qbEntries.GroupBy(e => e.Name).ToDictionary(g => g.Key, g => g.ToList());
+            var avionteByClient = avionteEntries.GroupBy(e => e.BillToName).ToDictionary(g => g.Key, g => g.ToList());
+            
+            debug.AppendLine($"\n2. CLIENT GROUPING:");
+            debug.AppendLine($"   QB clients containing {searchEmployee}:");
+            foreach (var clientKvp in qbByClient)
+            {
+                var employees = clientKvp.Value.Where(e => e.Item.Contains(searchEmployee, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (employees.Any())
+                    debug.AppendLine($"     Client: '{clientKvp.Key}' | Employees: {string.Join(", ", employees.Select(e => $"'{e.Item}'"))}");
+            }
+            
+            debug.AppendLine($"   Avionte clients containing {searchEmployee}:");
+            foreach (var clientKvp in avionteByClient)
+            {
+                var employees = clientKvp.Value.Where(e => e.Name.Contains(searchEmployee, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (employees.Any())
+                    debug.AppendLine($"     Client: '{clientKvp.Key}' | Employees: {string.Join(", ", employees.Select(e => $"'{e.Name}'"))}");
+            }
+            
+            // Step 3: Check client matching
+            var qbAmountsByClient = qbByClient.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Sum(x => x.Amount));
+            var avionteAmountsByClient = avionteByClient.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Sum(x => x.ItemBill));
+            var qbClientNames = qbByClient.Keys;
+            var avionteClientNames = avionteByClient.Keys;
+            var clientMatches = ClientMatcher.CreateUnifiedMatches(qbClientNames, avionteClientNames, qbAmountsByClient, avionteAmountsByClient);
+            
+            debug.AppendLine($"\n3. CLIENT MATCHING RESULTS:");
+            foreach (var clientMatch in clientMatches.Values)
+            {
+                var qbHasEmployee = clientMatch.QBName != null && qbByClient.ContainsKey(clientMatch.QBName) && 
+                                  qbByClient[clientMatch.QBName].Any(e => e.Item.Contains(searchEmployee, StringComparison.OrdinalIgnoreCase));
+                var avionteHasEmployee = clientMatch.AvionteName != null && avionteByClient.ContainsKey(clientMatch.AvionteName) && 
+                                       avionteByClient[clientMatch.AvionteName].Any(e => e.Name.Contains(searchEmployee, StringComparison.OrdinalIgnoreCase));
+                
+                if (qbHasEmployee || avionteHasEmployee)
+                {
+                    debug.AppendLine($"     Unified: '{clientMatch.UnifiedName}' | QB: '{clientMatch.QBName}' | Avionte: '{clientMatch.AvionteName}'");
+                    debug.AppendLine($"     IsPerfectMatch: {clientMatch.IsPerfectMatch} | QB Has Employee: {qbHasEmployee} | Avionte Has Employee: {avionteHasEmployee}");
+                    
+                    // Step 4: Test employee matching within this client
+                    if (clientMatch.IsPerfectMatch && qbHasEmployee && clientMatch.QBName != null && clientMatch.AvionteName != null)
+                    {
+                        var qbClientEntries = qbByClient[clientMatch.QBName];
+                        var avionteClientEntries = avionteByClient[clientMatch.AvionteName];
+                        var qbAmountsByEmployee = qbClientEntries.GroupBy(x => x.Item).ToDictionary(g => g.Key, g => g.Sum(x => x.Amount));
+                        var avionteAmountsByEmployee = avionteClientEntries.GroupBy(x => x.Name).ToDictionary(g => g.Key, g => g.Sum(x => x.ItemBill));
+                        
+                        var targetEmployee = qbClientEntries.FirstOrDefault(e => e.Item.Contains(searchEmployee, StringComparison.OrdinalIgnoreCase))?.Item;
+                        if (targetEmployee != null)
+                        {
+                            debug.AppendLine($"\n4. EMPLOYEE MATCHING TEST for '{targetEmployee}':");
+                            debug.AppendLine($"     QB Amount: {qbAmountsByEmployee[targetEmployee]:C}");
+                            debug.AppendLine($"     Available Avionte employees:");
+                            foreach (var emp in avionteAmountsByEmployee)
+                                debug.AppendLine($"       '{emp.Key}': {emp.Value:C}");
+                            
+                            var match = EmployeeMatcher.FindBestEmployeeMatchWithContext(
+                                targetEmployee, 
+                                avionteAmountsByEmployee.Keys,
+                                clientMatch.UnifiedName,
+                                qbAmountsByEmployee[targetEmployee],
+                                avionteAmountsByEmployee);
+                            
+                            debug.AppendLine($"     MATCH RESULT: '{match ?? "NO MATCH"}'");
+                            if (match != null)
+                            {
+                                debug.AppendLine($"     Matched Amount: {avionteAmountsByEmployee[match]:C}");
+                                debug.AppendLine($"     Amount Difference: {Math.Abs(qbAmountsByEmployee[targetEmployee] - avionteAmountsByEmployee[match]):C}");
+                            }
+                        }
+                    }
+                }
+            }
+            
+            return debug.ToString();
+        }
         public static ReconResults ProcessRecon(List<QuickBooksEntry> qbEntries, List<AvionteEntry> avionteEntries, List<DepositDetailEntry>? depositDetails = null)
         {
             var results = new ReconResults();

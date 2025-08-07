@@ -121,6 +121,7 @@ namespace JobCompareApp.Services
 
         /// <summary>
         /// Enhanced employee matching that considers client context and amount information
+        /// Uses a composite score that considers both name similarity and amount alignment
         /// </summary>
         public static string? FindBestEmployeeMatchWithContext(
             string qbEmployeeName, 
@@ -136,39 +137,60 @@ namespace JobCompareApp.Services
             if (!avionteNames.Any())
                 return null;
 
-            // First try standard matching
-            var standardMatch = FindBestEmployeeMatch(qbEmployeeName, avionteNames);
-            if (standardMatch != null)
-                return standardMatch;
-
-            // If standard matching fails, try amount-based matching with relaxed name similarity
-            var amountMatches = avionteNames
+            // Calculate composite scores for all potential matches
+            var allMatches = avionteNames
                 .Where(a => avionteAmountsByEmployee.ContainsKey(a))
-                .Select(a => new {
-                    Name = a,
-                    Amount = avionteAmountsByEmployee[a],
-                    NameSimilarity = CalculateNameSimilarity(NormalizeEmployeeName(qbEmployeeName), NormalizeEmployeeName(a)),
-                    AmountsZeroOut = Math.Abs(Math.Abs(qbAmount) - Math.Abs(avionteAmountsByEmployee[a])) < 0.01m && 
-                                   Math.Abs(qbAmount + avionteAmountsByEmployee[a]) < 0.01m
+                .Select(a => {
+                    var nameSimilarity = CalculateNameSimilarity(NormalizeEmployeeName(qbEmployeeName), NormalizeEmployeeName(a));
+                    var amountSimilarity = CalculateAmountSimilarity(qbAmount, avionteAmountsByEmployee[a]);
+                    var amountMatch = Math.Abs(qbAmount - avionteAmountsByEmployee[a]) < 0.01m;
+                    
+                    var baseScore = nameSimilarity;
+                    
+                    // Boost score significantly for exact amount matches
+                    if (amountMatch)
+                    {
+                        baseScore += 0.3; // Major boost for exact amounts
+                    }
+                    else
+                    {
+                        // Apply amount similarity multiplier
+                        baseScore *= (0.3 + 0.7 * amountSimilarity);
+                    }
+                    
+                    return new {
+                        Name = a,
+                        Amount = avionteAmountsByEmployee[a],
+                        NameSimilarity = nameSimilarity,
+                        AmountSimilarity = amountSimilarity,
+                        AmountMatch = amountMatch,
+                        CompositeScore = baseScore
+                    };
                 })
-                .Where(x => x.AmountsZeroOut && x.NameSimilarity >= 0.4) // Relaxed similarity for amount matches
-                .OrderByDescending(x => x.NameSimilarity)
+                .ToList();
+
+            // Find the best match with minimum threshold
+            var bestMatch = allMatches
+                .Where(x => x.CompositeScore >= 0.6) // Require decent overall score
+                .OrderByDescending(x => x.CompositeScore)
+                .ThenByDescending(x => x.NameSimilarity) // Tie-breaker
                 .FirstOrDefault();
 
-            if (amountMatches != null)
-                return amountMatches.Name;
+            return bestMatch?.Name;
+        }
 
-            // Final fallback: very loose matching for same client context
-            var looseMatch = avionteNames
-                .Select(a => new { 
-                    Name = a, 
-                    Score = CalculateNameSimilarity(NormalizeEmployeeName(qbEmployeeName), NormalizeEmployeeName(a))
-                })
-                .Where(x => x.Score >= 0.5) // Very loose threshold
-                .OrderByDescending(x => x.Score)
-                .FirstOrDefault();
-
-            return looseMatch?.Name;
+        /// <summary>
+        /// Calculates similarity between two amounts (0.0 to 1.0)
+        /// </summary>
+        private static double CalculateAmountSimilarity(decimal amount1, decimal amount2)
+        {
+            if (amount1 == 0 && amount2 == 0) return 1.0;
+            if (amount1 == 0 || amount2 == 0) return 0.0;
+            
+            var maxAmount = Math.Max(Math.Abs(amount1), Math.Abs(amount2));
+            var difference = Math.Abs(amount1 - amount2);
+            
+            return Math.Max(0.0, 1.0 - (double)(difference / maxAmount));
         }
 
         /// <summary>
