@@ -1,0 +1,245 @@
+@page "/Amazon"
+@using System.ComponentModel.DataAnnotations
+@using System.Text
+@using System.Text.RegularExpressions
+@using System.Linq
+@using JobCompare.Services
+
+@inject EmailService EmailService
+
+<h3>Amazon Order Request</h3>
+
+<form onsubmit="return false;">
+    <div class="mb-3">
+        <label>Email</label><br />
+        <input type="email" class="form-control" @bind="orderForm.Email" required /><br />
+        <label>Name</label><br />
+        <input type="text" class="form-control" @bind="orderForm.Name" required /><br />
+        <label>Department</label><br />
+        <input type="text" class="form-control" @bind="orderForm.Department" required /><br />
+    </div>
+
+    <h5>Products to Order</h5>
+    <table class="table table-bordered">
+        <thead>
+            <tr>
+                <th>Product Link</th>
+                <th>Quantity</th>
+                <th>Ship To</th>
+                <th>Date Needed</th>
+            </tr>
+        </thead>
+        <tbody>
+            @for (int i = 0; i < orderForm.Products.Count; i++)
+            {
+                var product = orderForm.Products[i];
+                <tr @key="product.Id">
+                    <td>
+                        <input class="form-control"
+                               placeholder="https://www.amazon.com/.../dp/B0XXXXXXX"
+                               @bind="product.ProductLink"
+                               @bind:event="oninput" />
+                    </td>
+                    <td>
+                        <input type="number" class="form-control" min="1"
+                               @bind="product.Quantity"
+                               @bind:event="oninput" />
+                    </td>
+                    <td>
+                        <input class="form-control"
+                               @bind="product.ShipTo"
+                               @bind:event="oninput" />
+                    </td>
+                    <td>
+                        <input type="date" class="form-control"
+                               @bind="product.DateNeeded" />
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <div class="d-flex gap-2">
+        <button type="button" class="btn btn-primary" @onclick="AddProduct" disabled="@(orderForm.Products.Count >= 10)">Add Product</button>
+        <button type="button" class="btn btn-success" @onclick="SubmitOrder">Submit Order Request</button>
+    </div>
+
+    @if (orderForm.Products.Count >= 10)
+    {
+        <div class="alert alert-info mt-2">
+            <b>Maximum of 10 products reached.</b><br />
+            If you need to order more than 10 items, please add all items to your Amazon shopping cart or wishlist and share the link with your manager or purchasing department.
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(successMessage))
+    {
+        <div class="alert alert-success mt-3">@successMessage</div>
+    }
+</form>
+
+@code {
+    private AmazonOrderForm orderForm = new();
+    private string successMessage;
+
+    // ASIN matcher: /dp/, /gp/product/, /gp/aw/d/, /gp/offer-listing/, or ?ASIN=
+    private static readonly Regex AsinRegex = new(
+        @"(?i)(?:/(?:dp|gp/product|gp/aw/d|gp/offer-listing)/|[?&](?:ASIN|asin)=)(?<asin>[A-Z0-9]{10})",
+        RegexOptions.Compiled);
+
+    private static string? TryGetAsin(string amazonUrl)
+    {
+        if (string.IsNullOrWhiteSpace(amazonUrl)) return null;
+        var m = AsinRegex.Match(amazonUrl);
+        return m.Success ? m.Groups["asin"].Value.ToUpperInvariant() : null;
+    }
+
+    // Always appends the static AssociateTag at the end
+    private static string BuildCartUrl(IEnumerable<(string AmazonUrl, int Quantity)> items, string domain = "www.amazon.com")
+    {
+        var asinToQty = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (url, qty) in items)
+        {
+            var asin = TryGetAsin(url);
+            if (asin == null || qty < 1) continue;
+            asinToQty[asin] = asinToQty.TryGetValue(asin, out var q) ? q + qty : qty;
+        }
+        if (asinToQty.Count == 0) return string.Empty;
+
+        var sb = new StringBuilder($"https://{domain}/gp/aws/cart/add.html?");
+        int i = 1;
+        foreach (var kvp in asinToQty)
+        {
+            if (i > 1) sb.Append('&');
+            sb.Append($"ASIN.{i}={Uri.EscapeDataString(kvp.Key)}&Quantity.{i}={kvp.Value}");
+            i++;
+        }
+        sb.Append("&AssociateTag=yourtag-20"); // static tag
+        return sb.ToString();
+    }
+
+    protected override void OnInitialized()
+    {
+        if (orderForm.Products == null || orderForm.Products.Count == 0)
+            orderForm.Products = new List<ProductModel> { new ProductModel() };
+    }
+
+    private void AddProduct()
+    {
+        orderForm.Products ??= new List<ProductModel>();
+        if (orderForm.Products.Count < 10)
+            orderForm.Products.Add(new ProductModel());
+    }
+
+    private static string HtmlEncode(string? s) => System.Net.WebUtility.HtmlEncode(s ?? string.Empty);
+
+    private string BuildHtmlBody(string cartLink)
+    {
+        var sb = new StringBuilder();
+
+        sb.Append("<p><b>Amazon Order Request</b></p>");
+        sb.Append("<p>");
+        sb.Append("Requested By: ").Append(HtmlEncode(orderForm.Name))
+          .Append(" (").Append(HtmlEncode(orderForm.Email)).Append(")<br/>");
+        sb.Append("Department: ").Append(HtmlEncode(orderForm.Department));
+        sb.Append("</p>");
+
+        sb.Append("<p><b>Products:</b><br/>");
+        for (int i = 0; i < orderForm.Products.Count; i++)
+        {
+            var p = orderForm.Products[i];
+            if (string.IsNullOrWhiteSpace(p.ProductLink)) continue;
+
+            sb.Append(HtmlEncode($"{i + 1}. {p.ProductLink} | Qty: {p.Quantity} | Ship To: {p.ShipTo} | Date Needed: {(p.DateNeeded.HasValue ? p.DateNeeded.Value.ToString("MM/dd/yyyy") : "N/A")}"))
+              .Append("<br/>");
+        }
+        sb.Append("</p>");
+
+        if (!string.IsNullOrEmpty(cartLink))
+        {
+            var encLink = HtmlEncode(cartLink);
+            sb.Append("<p><b>Pre-filled Amazon cart link:</b> ")
+              .Append("<a href=\"").Append(encLink).Append("\" target=\"_blank\">Open Cart</a><br/>")
+              .Append(encLink)
+              .Append("</p>");
+        }
+        else
+        {
+            sb.Append("<p><i>No valid ASINs were detected.</i></p>");
+        }
+
+        return sb.ToString();
+    }
+
+    private string BuildTextBody(string cartLink)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("Amazon Order Request");
+        sb.AppendLine();
+        sb.AppendLine($"Requested By: {orderForm.Name} ({orderForm.Email})");
+        sb.AppendLine($"Department : {orderForm.Department}");
+        sb.AppendLine();
+        sb.AppendLine("Products:");
+        for (int i = 0; i < orderForm.Products.Count; i++)
+        {
+            var p = orderForm.Products[i];
+            if (string.IsNullOrWhiteSpace(p.ProductLink)) continue;
+            sb.AppendLine($"{i + 1}. {p.ProductLink} | Qty: {p.Quantity} | Ship To: {p.ShipTo} | Date Needed: {(p.DateNeeded.HasValue ? p.DateNeeded.Value.ToString("MM/dd/yyyy") : "N/A")}");
+        }
+        sb.AppendLine();
+        if (!string.IsNullOrEmpty(cartLink))
+        {
+            sb.AppendLine("Pre-filled Amazon cart link (requires login and confirmation):");
+            sb.AppendLine(cartLink);
+        }
+        else
+        {
+            sb.AppendLine("No valid ASINs were detected. Please verify the product links include /dp/<ASIN> or /gp/product/<ASIN>.");
+        }
+
+        return sb.ToString();
+    }
+
+    private async Task SubmitOrder()
+    {
+        // Build the pre-filled Amazon link
+        var items = orderForm.Products
+            .Where(p => !string.IsNullOrWhiteSpace(p.ProductLink) && p.Quantity > 0)
+            .Select(p => (p.ProductLink.Trim(), p.Quantity))
+            .ToList();
+
+        var cartLink = BuildCartUrl(items);
+
+        // Compose email content as before
+        var subject = $"Amazon Order Request - {orderForm.Name} ({orderForm.Department})";
+        var textBody = BuildTextBody(cartLink);
+        var htmlBody = BuildHtmlBody(cartLink);
+
+        // Use the new EmailService, but preserve the content
+        var emailRequest = new EmailRequest
+        {
+            Html = htmlBody,
+            Subject = subject
+        };
+
+        await EmailService.JobCompareEmailAsync(emailRequest);
+        successMessage = "Order request submitted! We’ve emailed purchasing with your summary and a pre-filled Amazon cart link.";
+    }
+
+    public class AmazonOrderForm
+    {
+        [Required] public string Email { get; set; }
+        [Required] public string Name { get; set; }
+        [Required] public string Department { get; set; }
+        public List<ProductModel> Products { get; set; } = new();
+    }
+
+    public class ProductModel
+    {
+        public Guid Id { get; set; } = Guid.NewGuid();
+        [Required] public string ProductLink { get; set; }
+        [Range(1, 1000)] public int Quantity { get; set; } = 1;
+        [Required] public string ShipTo { get; set; }
+        public DateTime? DateNeeded { get; set; }
+    }
+}
